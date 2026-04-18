@@ -306,7 +306,7 @@ function bindStatic() {
     // Si la fecha no es hoy, bloqueado por default (aunque no haya transmisión)
     const hoy = new Date().toISOString().slice(0, 10);
     if (state.fecha !== hoy && !state.transmittedAt) {
-      state.transmittedAt = "1970-01-01T00:00:00Z"; // marcador de bloqueo "día anterior"
+      state.transmittedAt = LOCK_MARKER_DIA_ANTERIOR;
     }
     renderAll();
     applyLockState();
@@ -414,6 +414,9 @@ function toggleModal(id, show) {
   el.classList.toggle("hidden", !show);
 }
 
+// Marcador de "día anterior sin cierre real"
+const LOCK_MARKER_DIA_ANTERIOR = "1970-01-01T00:00:00Z";
+
 function isLocked() {
   // Está bloqueado si el cierre ya fue transmitido Y el unlock no está vigente
   if (!state.transmittedAt) return false;
@@ -428,13 +431,24 @@ function applyLockState() {
   const lockedBanner = document.getElementById("lockedBanner");
   lockedBanner.classList.toggle("hidden", !locked);
   if (locked) {
-    const d = new Date(state.transmittedAt);
     const esHoy = state.fecha === new Date().toISOString().slice(0, 10);
-    document.getElementById("lockedBannerTitle").textContent = esHoy
-      ? "Cierre del día ya transmitido"
-      : "Cierre de día anterior";
-    document.getElementById("lockedBannerSubtitle").textContent =
-      `Transmitido ${d.toLocaleString("es-AR")}. Pedí un código al administrador para editar.`;
+    const esMarkerDiaAnterior = state.transmittedAt === LOCK_MARKER_DIA_ANTERIOR;
+
+    if (esMarkerDiaAnterior) {
+      // Día anterior, sin transmisión previa real
+      document.getElementById("lockedBannerTitle").textContent = "📅 Día anterior";
+      document.getElementById("lockedBannerSubtitle").textContent =
+        "Estás viendo un día pasado. Para cargar o modificar datos, pedí un código al administrador.";
+    } else {
+      // Transmisión real
+      const d = new Date(state.transmittedAt);
+      const cuando = d.toLocaleString("es-AR");
+      document.getElementById("lockedBannerTitle").textContent = esHoy
+        ? "🔒 Cierre del día ya transmitido"
+        : "🔒 Cierre de día anterior transmitido";
+      document.getElementById("lockedBannerSubtitle").textContent =
+        `Transmitido ${cuando}. Pedí un código al administrador para editar.`;
+    }
   }
 
   // Banner unlocked con timer
@@ -697,7 +711,7 @@ function updateLastSaved(text) {
   // Si la fecha inicial no es hoy, también bloqueamos
   const hoy = new Date().toISOString().slice(0, 10);
   if (state.fecha !== hoy && !state.transmittedAt) {
-    state.transmittedAt = "1970-01-01T00:00:00Z";
+    state.transmittedAt = LOCK_MARKER_DIA_ANTERIOR;
   }
 
   renderAll();
