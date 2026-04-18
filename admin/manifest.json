@@ -1,0 +1,25 @@
+{
+  "name": "OiMira Admin",
+  "short_name": "OiMira Admin",
+  "description": "Panel administrativo — revisar cierres diarios de OiMira",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#b45309",
+  "background_color": "#fef3c7",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

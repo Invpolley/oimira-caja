@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#b45309">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="OiMira Admin">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<title>OiMira Admin — Panel de Cierres</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(180deg, #fef3c7 0%, #fde68a 100%);
+    min-height: 100vh;
+  }
+  .card { box-shadow: 0 4px 6px -1px rgba(0,0,0,0.07); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Mono", monospace; }
+
+  /* Tabla de cierres */
+  .day-row {
+    display: grid;
+    grid-template-columns: 90px 1fr 1fr 50px 40px;
+    gap: 8px;
+    padding: 10px 12px;
+    align-items: center;
+    background: white;
+    border: 2px solid #fde68a;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .day-row:hover { border-color: #d97706; background: #fffbeb; }
+  .day-row.expanded { border-color: #b45309; background: #fef3c7; }
+
+  /* KPI cards */
+  .kpi {
+    background: white;
+    border: 2px solid;
+    border-radius: 12px;
+    padding: 12px;
+    text-align: center;
+  }
+  .kpi-label { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }
+  .kpi-value { font-size: 20px; font-weight: 700; margin-top: 2px; }
+
+  /* Detalle expandido */
+  .detail-panel {
+    background: #fffbeb;
+    border: 2px solid #fbbf24;
+    border-top: none;
+    border-radius: 0 0 10px 10px;
+    padding: 12px;
+    margin-top: -8px;
+    margin-bottom: 8px;
+  }
+
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .pill-r { background: #dcfce7; color: #166534; }
+  .pill-b { background: #dbeafe; color: #1e40af; }
+  .pill-gas { background: #fee2e2; color: #991b1b; }
+  .pill-ing { background: #d1fae5; color: #065f46; }
+
+  .online-dot { background: #22c55e; }
+  .offline-dot { background: #ef4444; }
+  .syncing-dot { background: #eab308; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* Mobile adjustments */
+  @media (max-width: 640px) {
+    .day-row {
+      grid-template-columns: 80px 1fr 40px;
+    }
+    .day-row .col-bs { display: none; }
+    .day-row .col-cajera { display: none; }
+  }
+
+  input, select, textarea { font-size: 16px !important; }
+</style>
+</head>
+<body class="pb-24">
+
+<!-- Gate de PIN -->
+<div id="pinGate" class="fixed inset-0 z-50 bg-gradient-to-br from-amber-700 to-orange-800 flex items-center justify-center p-6">
+  <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+    <div class="text-center mb-4">
+      <div class="text-5xl mb-2">🔐</div>
+      <h1 class="text-xl font-bold text-amber-900">OiMira Admin</h1>
+      <p class="text-sm text-gray-500 mt-1">Ingresá el PIN para continuar</p>
+    </div>
+    <input type="password" id="pinInput" inputmode="numeric" pattern="[0-9]*" maxlength="8"
+           placeholder="PIN"
+           class="w-full p-4 border-2 border-amber-300 rounded-xl text-center text-2xl mono tracking-widest focus:outline-none focus:border-amber-600"/>
+    <button id="pinSubmit" class="mt-3 w-full py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-xl font-bold text-lg shadow">
+      Entrar
+    </button>
+    <p id="pinError" class="hidden text-center text-red-600 text-sm mt-2">PIN incorrecto</p>
+  </div>
+</div>
+
+<!-- App principal (oculta hasta pasar el PIN) -->
+<div id="app" class="hidden">
+
+<!-- Header -->
+<header class="bg-gradient-to-r from-amber-700 to-orange-600 text-white p-4 shadow-lg sticky top-0 z-20">
+  <div class="max-w-5xl mx-auto flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <span class="text-3xl">📊</span>
+      <div>
+        <h1 class="text-lg font-bold leading-tight">OiMira Admin</h1>
+        <p class="text-amber-100 text-xs">Panel de cierres diarios</p>
+      </div>
+    </div>
+    <div class="text-right text-xs">
+      <div class="flex items-center gap-1 justify-end">
+        <span id="statusDot" class="inline-block w-2 h-2 rounded-full online-dot"></span>
+        <span id="statusText">Conectado</span>
+      </div>
+      <button id="logoutBtn" class="mt-1 bg-white/20 border border-white/30 rounded px-2 py-0.5 text-xs hover:bg-white/30">
+        Salir
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-5xl mx-auto p-3 space-y-3">
+
+  <!-- Filtro de rango -->
+  <div class="bg-white rounded-xl p-3 card">
+    <div class="flex flex-wrap items-end gap-2">
+      <div class="flex-1 min-w-[140px]">
+        <label class="text-xs text-gray-600 block">Desde</label>
+        <input type="date" id="fechaDesde" class="w-full p-2 border-2 border-gray-300 rounded-lg font-semibold"/>
+      </div>
+      <div class="flex-1 min-w-[140px]">
+        <label class="text-xs text-gray-600 block">Hasta</label>
+        <input type="date" id="fechaHasta" class="w-full p-2 border-2 border-gray-300 rounded-lg font-semibold"/>
+      </div>
+      <div class="flex gap-1">
+        <button data-range="7" class="range-btn px-3 py-2 bg-amber-100 border-2 border-amber-300 rounded-lg text-sm font-semibold hover:bg-amber-200">7d</button>
+        <button data-range="30" class="range-btn px-3 py-2 bg-amber-100 border-2 border-amber-300 rounded-lg text-sm font-semibold hover:bg-amber-200">30d</button>
+        <button data-range="90" class="range-btn px-3 py-2 bg-amber-100 border-2 border-amber-300 rounded-lg text-sm font-semibold hover:bg-amber-200">90d</button>
+        <button id="refreshBtn" class="px-3 py-2 bg-green-100 border-2 border-green-400 rounded-lg text-sm font-semibold hover:bg-green-200" title="Recargar">
+          🔄
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- KPIs -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+    <div class="kpi border-green-400">
+      <div class="kpi-label">Ingresos R$</div>
+      <div class="kpi-value mono text-green-700" id="kpiIngRs">R$ 0,00</div>
+    </div>
+    <div class="kpi border-blue-400">
+      <div class="kpi-label">Ingresos Bs</div>
+      <div class="kpi-value mono text-blue-700" id="kpiIngBs">Bs 0,00</div>
+    </div>
+    <div class="kpi border-red-300">
+      <div class="kpi-label">Gastos R$ + Bs</div>
+      <div class="kpi-value mono text-red-700" id="kpiGastos">R$ 0,00</div>
+    </div>
+    <div class="kpi border-amber-400">
+      <div class="kpi-label">Días cerrados</div>
+      <div class="kpi-value text-amber-800"><span id="kpiDias">0</span> <span class="text-sm text-gray-500" id="kpiDiasRango"></span></div>
+    </div>
+  </div>
+
+  <!-- Gráfico de evolución -->
+  <div class="bg-white rounded-xl p-3 card">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-base font-bold text-amber-800">📈 Evolución diaria</h2>
+      <div class="flex gap-1 text-xs">
+        <button data-chart="ingresos" class="chart-btn px-2 py-1 bg-amber-500 text-white rounded font-semibold">Ingresos</button>
+        <button data-chart="neto" class="chart-btn px-2 py-1 bg-gray-200 rounded font-semibold">Neto</button>
+        <button data-chart="trigo" class="chart-btn px-2 py-1 bg-gray-200 rounded font-semibold">Trigo</button>
+      </div>
+    </div>
+    <div class="relative" style="height: 260px;">
+      <canvas id="chartEvolucion"></canvas>
+    </div>
+  </div>
+
+  <!-- Lista de días con detalle expandible -->
+  <div class="bg-white rounded-xl p-3 card">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-base font-bold text-amber-800">📅 Cierres</h2>
+      <div class="flex gap-1">
+        <button id="exportCsvBtn" class="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700">
+          ⬇ CSV
+        </button>
+        <button id="toggleAllBtn" class="px-3 py-1.5 bg-amber-100 border border-amber-300 rounded-lg text-xs font-semibold">
+          Expandir todo
+        </button>
+      </div>
+    </div>
+
+    <!-- Encabezados -->
+    <div class="hidden md:grid day-row bg-amber-100 border-amber-300 font-semibold text-xs text-amber-900 cursor-default" style="padding:6px 12px;">
+      <div>Fecha</div>
+      <div class="text-right">Ingresos R$</div>
+      <div class="text-right col-bs">Ingresos Bs</div>
+      <div class="text-center col-cajera">🌾</div>
+      <div></div>
+    </div>
+
+    <div id="diasList" class="space-y-2 mt-2"></div>
+    <div id="emptyState" class="hidden text-center text-gray-500 py-8">
+      <div class="text-4xl mb-2">📭</div>
+      <p class="text-sm">No hay cierres en este rango</p>
+    </div>
+    <div id="loadingState" class="text-center text-gray-500 py-8">
+      <div class="text-4xl mb-2 animate-pulse">⏳</div>
+      <p class="text-sm">Cargando...</p>
+    </div>
+  </div>
+
+  <!-- Resumen por cajera -->
+  <div class="bg-white rounded-xl p-3 card">
+    <h2 class="text-base font-bold text-amber-800 mb-2">👥 Por cajera</h2>
+    <div id="porCajera" class="space-y-2"></div>
+  </div>
+
+  <!-- Resumen gastos por categoría -->
+  <div class="bg-white rounded-xl p-3 card">
+    <h2 class="text-base font-bold text-amber-800 mb-2">💸 Gastos por categoría</h2>
+    <div id="porCategoria" class="space-y-2"></div>
+  </div>
+
+  <!-- Footer info -->
+  <div class="text-center text-xs text-gray-500 py-3">
+    Datos en vivo desde Supabase · <a href="https://supabase.com/dashboard/project/ilotlgspskcqcjpnccix" target="_blank" class="text-amber-700 underline">Abrir dashboard</a>
+  </div>
+
+</main>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-2xl z-50 text-sm font-medium"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
