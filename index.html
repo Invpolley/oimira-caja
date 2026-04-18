@@ -168,6 +168,31 @@
            class="w-full p-3 border-2 border-gray-300 rounded-lg text-lg font-semibold"/>
   </div>
 
+  <!-- Banner: cierre bloqueado (transmitido o día anterior) -->
+  <div id="lockedBanner" class="hidden bg-red-50 border-2 border-red-300 rounded-xl p-3 card">
+    <div class="flex items-start gap-2">
+      <div class="text-2xl">🔒</div>
+      <div class="flex-1">
+        <div class="font-bold text-red-800 text-sm" id="lockedBannerTitle">Cierre bloqueado</div>
+        <div class="text-xs text-red-700 mt-0.5" id="lockedBannerSubtitle">Este cierre ya fue transmitido. Pedí un código al administrador para editarlo.</div>
+      </div>
+      <button id="unlockBtn" class="bg-red-600 text-white rounded-lg px-3 py-2 text-xs font-bold hover:bg-red-700">
+        🔑 Desbloquear
+      </button>
+    </div>
+  </div>
+
+  <!-- Banner: modo desbloqueado (temporal) -->
+  <div id="unlockedBanner" class="hidden bg-amber-50 border-2 border-amber-300 rounded-xl p-3 card">
+    <div class="flex items-center gap-2 text-xs">
+      <div class="text-xl">✏️</div>
+      <div class="flex-1">
+        <div class="font-bold text-amber-800">Modo edición activo</div>
+        <div class="text-amber-700">Estás editando un cierre bloqueado. <b id="unlockedTimer">30:00</b> restantes.</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Ingresos -->
   <div class="bg-white rounded-xl p-3 card">
     <h2 class="text-base font-bold text-green-700 mb-2 flex items-center gap-2">
@@ -253,6 +278,72 @@
   <div id="lastSaved" class="text-center text-xs text-gray-500 mt-2"></div>
 
 </main>
+
+<!-- ================================== -->
+<!-- Modal: Confirmar envío / cierre     -->
+<!-- ================================== -->
+<div id="modalConfirmar" class="hidden fixed inset-0 bg-black/60 z-40 flex items-center justify-center p-3">
+  <div class="bg-white rounded-2xl p-4 max-w-sm w-full max-h-[95vh] overflow-y-auto">
+    <div class="text-center mb-3">
+      <div class="text-4xl mb-1">🔒</div>
+      <h2 class="text-lg font-bold text-amber-800">¿Cerrar el día?</h2>
+      <p class="text-xs text-gray-600 mt-1">Una vez cerrado, no vas a poder modificarlo sin un código del administrador.</p>
+    </div>
+
+    <div class="bg-amber-50 border-2 border-amber-200 rounded-lg p-3 mb-3 text-sm">
+      <div class="font-bold text-amber-800 mb-1">📋 Resumen del cierre</div>
+      <div class="space-y-0.5 text-xs">
+        <div class="flex justify-between"><span>📅 Fecha:</span><span class="font-semibold" id="conf_fecha">—</span></div>
+        <div class="flex justify-between"><span>👤 Cajera:</span><span class="font-semibold" id="conf_cajera">—</span></div>
+        <div class="flex justify-between"><span>💰 Ingresos R$:</span><span class="mono font-bold text-green-700" id="conf_ingR">R$ 0</span></div>
+        <div class="flex justify-between"><span>💰 Ingresos Bs:</span><span class="mono font-bold text-green-700" id="conf_ingB">Bs 0</span></div>
+        <div class="flex justify-between"><span>💸 Gastos R$:</span><span class="mono font-semibold text-red-700" id="conf_gasR">R$ 0</span></div>
+        <div class="flex justify-between"><span>💸 Gastos Bs:</span><span class="mono font-semibold text-red-700" id="conf_gasB">Bs 0</span></div>
+        <div class="flex justify-between border-t border-amber-300 pt-1 mt-1"><span>🎫 Tickets:</span><span class="font-bold" id="conf_tickets">0</span></div>
+        <div class="flex justify-between"><span>🌾 Sacos:</span><span class="font-bold" id="conf_sacos">0</span></div>
+      </div>
+    </div>
+
+    <label class="flex items-start gap-2 p-2 bg-rose-50 rounded-lg mb-3">
+      <input type="checkbox" id="conf_check" class="mt-0.5"/>
+      <span class="text-xs text-rose-800">Confirmo que <b>todos los datos están correctos</b> y entiendo que después del cierre no podré editar sin código.</span>
+    </label>
+
+    <div class="flex gap-2">
+      <button id="conf_cancelar" class="flex-1 py-3 border-2 border-gray-300 rounded-lg font-semibold">
+        Cancelar
+      </button>
+      <button id="conf_enviar" disabled class="flex-1 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg font-bold disabled:bg-gray-300 disabled:from-gray-300 disabled:to-gray-300 disabled:cursor-not-allowed">
+        Sí, cerrar día
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ================================== -->
+<!-- Modal: Desbloquear con código       -->
+<!-- ================================== -->
+<div id="modalUnlock" class="hidden fixed inset-0 bg-black/60 z-40 flex items-center justify-center p-3">
+  <div class="bg-white rounded-2xl p-4 max-w-sm w-full">
+    <div class="text-center mb-3">
+      <div class="text-4xl mb-1">🔑</div>
+      <h2 class="text-lg font-bold text-indigo-700">Código de edición</h2>
+      <p class="text-xs text-gray-600 mt-1">Pedile al administrador el código de 6 dígitos para editar este cierre.</p>
+    </div>
+    <input type="tel" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+           id="unlock_code" placeholder="000000"
+           class="w-full p-4 border-2 border-indigo-300 rounded-xl text-center mono text-3xl font-bold tracking-[0.5em] focus:outline-none focus:border-indigo-600"/>
+    <p id="unlock_error" class="hidden text-center text-red-600 text-sm mt-2">Código inválido</p>
+    <div class="flex gap-2 mt-4">
+      <button id="unlock_cancel" class="flex-1 py-3 border-2 border-gray-300 rounded-lg font-semibold">
+        Cancelar
+      </button>
+      <button id="unlock_submit" class="flex-1 py-3 bg-indigo-600 text-white rounded-lg font-bold">
+        Desbloquear
+      </button>
+    </div>
+  </div>
+</div>
 
 <!-- Modal de mensaje -->
 <div id="toast" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-2xl z-50 text-sm font-medium max-w-xs"></div>

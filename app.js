@@ -30,6 +30,8 @@ const state = {
   tickets: 0,
   observacoes: "",
   cierreId: null, // UUID del cierre actual (si ya existe en DB)
+  transmittedAt: null,  // si está seteado = cierre oficialmente cerrado
+  unlockUntil: 0,       // ms timestamp hasta cuando el modo edición sigue activo
 };
 
 let categorias = [];   // catálogo de categorías de gastos
@@ -253,6 +255,7 @@ async function loadExistingCierre() {
   state.sacosTrigo = data.sacos_trigo || 0;
   state.tickets = data.tickets || 0;
   state.observacoes = data.observacoes || "";
+  state.transmittedAt = data.transmitted_at || null;  // null = borrador, timestamp = cerrado
 
   // Rellenar ingresos preset
   state.ingresos = ingresosCatalog.map(fp => {
@@ -295,8 +298,18 @@ function bindStatic() {
     state.cierreId = null;
     state.ingresos = [];
     state.gastos = [];
+    state.transmittedAt = null;
+    state.unlockUntil = 0;
+    if (_unlockTimer) { clearInterval(_unlockTimer); _unlockTimer = null; }
     await loadExistingCierre();
+
+    // Si la fecha no es hoy, bloqueado por default (aunque no haya transmisión)
+    const hoy = new Date().toISOString().slice(0, 10);
+    if (state.fecha !== hoy && !state.transmittedAt) {
+      state.transmittedAt = "1970-01-01T00:00:00Z"; // marcador de bloqueo "día anterior"
+    }
     renderAll();
+    applyLockState();
   });
 
   // Cajera — con persistencia entre sesiones (localStorage)
@@ -370,8 +383,165 @@ function bindStatic() {
     toast("✅ Borrador guardado localmente");
   });
 
-  // Enviar
-  document.getElementById("enviarBtn").addEventListener("click", enviarCierre);
+  // Enviar → primero confirmar
+  document.getElementById("enviarBtn").addEventListener("click", openConfirmModal);
+
+  // Desbloqueo
+  document.getElementById("unlockBtn").addEventListener("click", openUnlockModal);
+  document.getElementById("unlock_cancel").addEventListener("click", () => toggleModal("modalUnlock", false));
+  document.getElementById("unlock_submit").addEventListener("click", submitUnlockCode);
+  document.getElementById("unlock_code").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitUnlockCode();
+  });
+
+  // Confirm modal
+  document.getElementById("conf_cancelar").addEventListener("click", () => toggleModal("modalConfirmar", false));
+  document.getElementById("conf_enviar").addEventListener("click", () => {
+    toggleModal("modalConfirmar", false);
+    enviarCierre(/*transmitir*/ true);
+  });
+  document.getElementById("conf_check").addEventListener("change", (e) => {
+    document.getElementById("conf_enviar").disabled = !e.target.checked;
+  });
+}
+
+// ============================================================
+// Helpers de modal/lock/unlock
+// ============================================================
+function toggleModal(id, show) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle("hidden", !show);
+}
+
+function isLocked() {
+  // Está bloqueado si el cierre ya fue transmitido Y el unlock no está vigente
+  if (!state.transmittedAt) return false;
+  return Date.now() > (state.unlockUntil || 0);
+}
+
+function applyLockState() {
+  const locked = isLocked();
+  const inUnlock = state.transmittedAt && Date.now() < (state.unlockUntil || 0);
+
+  // Banner locked
+  const lockedBanner = document.getElementById("lockedBanner");
+  lockedBanner.classList.toggle("hidden", !locked);
+  if (locked) {
+    const d = new Date(state.transmittedAt);
+    const esHoy = state.fecha === new Date().toISOString().slice(0, 10);
+    document.getElementById("lockedBannerTitle").textContent = esHoy
+      ? "Cierre del día ya transmitido"
+      : "Cierre de día anterior";
+    document.getElementById("lockedBannerSubtitle").textContent =
+      `Transmitido ${d.toLocaleString("es-AR")}. Pedí un código al administrador para editar.`;
+  }
+
+  // Banner unlocked con timer
+  const unlockedBanner = document.getElementById("unlockedBanner");
+  unlockedBanner.classList.toggle("hidden", !inUnlock);
+
+  // Deshabilitar inputs
+  const editables = document.querySelectorAll("#fecha, #sacosTrigo, #tickets, #observacoes, #addIngresoBtn, #addGastoBtn, #ingresosList input, #gastosList input, #gastosList select, #ingresosList button, #gastosList button, #enviarBtn, #guardarBtn");
+  editables.forEach(el => {
+    // fecha siempre se puede cambiar (para ver otros días)
+    if (el.id === "fecha") return;
+    if (locked) el.setAttribute("disabled", "true");
+    else el.removeAttribute("disabled");
+  });
+}
+
+// Timer del unlock
+let _unlockTimer = null;
+function startUnlockTimer() {
+  if (_unlockTimer) clearInterval(_unlockTimer);
+  _unlockTimer = setInterval(() => {
+    const restante = state.unlockUntil - Date.now();
+    if (restante <= 0) {
+      clearInterval(_unlockTimer); _unlockTimer = null;
+      state.unlockUntil = 0;
+      applyLockState();
+      toast("⏱ Modo edición expirado. Enviá si querés guardar cambios.");
+      return;
+    }
+    const mm = Math.floor(restante / 60000);
+    const ss = Math.floor((restante % 60000) / 1000);
+    const el = document.getElementById("unlockedTimer");
+    if (el) el.textContent = mm + ":" + String(ss).padStart(2, "0");
+  }, 1000);
+}
+
+function openUnlockModal() {
+  document.getElementById("unlock_code").value = "";
+  document.getElementById("unlock_error").classList.add("hidden");
+  toggleModal("modalUnlock", true);
+  setTimeout(() => document.getElementById("unlock_code").focus(), 100);
+}
+
+async function submitUnlockCode() {
+  const code = document.getElementById("unlock_code").value.trim();
+  const errEl = document.getElementById("unlock_error");
+  errEl.classList.add("hidden");
+  if (!/^\d{6}$/.test(code)) {
+    errEl.textContent = "El código debe tener 6 dígitos";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  try {
+    const { data, error } = await supabase.rpc("consume_unlock_code", {
+      p_code: code,
+      p_fecha: state.fecha,
+      p_cajera: state.cajera,
+    });
+    if (error) throw error;
+    if (!data?.ok) {
+      errEl.textContent = data?.error || "Código inválido";
+      errEl.classList.remove("hidden");
+      return;
+    }
+    // Unlock por 30 minutos
+    state.unlockUntil = Date.now() + 30 * 60 * 1000;
+    toggleModal("modalUnlock", false);
+    applyLockState();
+    startUnlockTimer();
+    toast("✅ Desbloqueado por 30 minutos" + (data.descripcion ? " — " + data.descripcion : ""));
+  } catch (e) {
+    errEl.textContent = "Error de conexión: " + (e.message || e);
+    errEl.classList.remove("hidden");
+  }
+}
+
+// ============================================================
+// Modal de confirmación de envío
+// ============================================================
+function openConfirmModal() {
+  // Validar que haya algo que enviar
+  const tieneIngresos = state.ingresos.some(i => Number(i.monto) > 0);
+  const tieneGastos = state.gastos.some(g => Number(g.monto) > 0);
+  if (!tieneIngresos && !tieneGastos && !state.sacosTrigo && !state.tickets) {
+    toast("⚠️ No hay datos para cerrar");
+    return;
+  }
+
+  const sumR = state.ingresos.filter(i => i.moeda === "R$").reduce((s, i) => s + (Number(i.monto) || 0), 0);
+  const sumB = state.ingresos.filter(i => i.moeda === "Bs").reduce((s, i) => s + (Number(i.monto) || 0), 0);
+  const gasR = state.gastos.filter(g => g.moeda === "R$").reduce((s, g) => s + (Number(g.monto) || 0), 0);
+  const gasB = state.gastos.filter(g => g.moeda === "Bs").reduce((s, g) => s + (Number(g.monto) || 0), 0);
+
+  const fmt = (v, m) => m + " " + (Number(v) || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  document.getElementById("conf_fecha").textContent = state.fecha;
+  document.getElementById("conf_cajera").textContent = state.cajera;
+  document.getElementById("conf_ingR").textContent = fmt(sumR, "R$");
+  document.getElementById("conf_ingB").textContent = fmt(sumB, "Bs");
+  document.getElementById("conf_gasR").textContent = "− " + fmt(gasR, "R$");
+  document.getElementById("conf_gasB").textContent = "− " + fmt(gasB, "Bs");
+  document.getElementById("conf_tickets").textContent = state.tickets;
+  document.getElementById("conf_sacos").textContent = state.sacosTrigo;
+  document.getElementById("conf_check").checked = false;
+  document.getElementById("conf_enviar").disabled = true;
+
+  toggleModal("modalConfirmar", true);
 }
 
 function renderAll() {
@@ -388,7 +558,7 @@ function renderAll() {
 // ============================================================================
 // Enviar al Supabase
 // ============================================================================
-async function enviarCierre() {
+async function enviarCierre(transmitir = true) {
   const btn = document.getElementById("enviarBtn");
   btn.disabled = true;
   btn.textContent = "⏳ Enviando...";
@@ -411,6 +581,10 @@ async function enviarCierre() {
       observacoes: state.observacoes,
       device: DEVICE_NAME,
     };
+    // Solo marcar transmitted_at cuando es confirmación oficial del cierre
+    if (transmitir) {
+      cierrePayload.transmitted_at = new Date().toISOString();
+    }
 
     let cierreId = state.cierreId;
 
@@ -462,7 +636,14 @@ async function enviarCierre() {
       if (e3) throw e3;
     }
 
-    toast("✅ Cierre enviado correctamente");
+    if (transmitir) {
+      state.transmittedAt = cierrePayload.transmitted_at;
+      state.unlockUntil = 0; // consume el unlock si estaba activo
+      applyLockState();
+      toast("🔒 Día cerrado oficialmente. Solo editable con código de admin.");
+    } else {
+      toast("✅ Cierre enviado correctamente");
+    }
     updateStatus();
 
   } catch (err) {
@@ -513,7 +694,14 @@ function updateLastSaved(text) {
     toast("⚠️ Sin conexión — usando datos locales");
   }
 
+  // Si la fecha inicial no es hoy, también bloqueamos
+  const hoy = new Date().toISOString().slice(0, 10);
+  if (state.fecha !== hoy && !state.transmittedAt) {
+    state.transmittedAt = "1970-01-01T00:00:00Z";
+  }
+
   renderAll();
+  applyLockState();
 })();
 
 // Registrar Service Worker

@@ -571,6 +571,125 @@ function init() {
 
   // Wire del módulo de caja (modales, retiros, etc)
   wireCajaListeners();
+  // Wire del generador de códigos
+  wireCodigoListeners();
+}
+
+// ============================================================
+// 🔑 Generador de códigos de edición (para desbloquear PWA caja)
+// ============================================================
+function randomCode6() {
+  // 6 dígitos sin ceros a la izquierda
+  return String(100000 + Math.floor(Math.random() * 900000));
+}
+
+function openCodigoModal() {
+  $("cg_fecha").value = "";
+  $("cg_descripcion").value = "";
+  $("cg_formView").classList.remove("hidden");
+  $("cg_resultView").classList.add("hidden");
+  renderCodigosRecientes();
+  openModal("modalCodigo");
+}
+
+async function generarCodigo() {
+  const fecha = $("cg_fecha").value || null;
+  const descripcion = $("cg_descripcion").value.trim() || null;
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // +30 min
+
+  // Intentar hasta 5 veces por colisión (muy improbable)
+  for (let i = 0; i < 5; i++) {
+    const code = randomCode6();
+    const { data, error } = await sb.from("admin_unlock_code").insert({
+      code,
+      fecha_objetivo: fecha,
+      descripcion,
+      expires_at: expiresAt.toISOString(),
+    }).select().single();
+
+    if (!error) {
+      $("cg_codigoDisplay").textContent = code;
+      const hh = String(expiresAt.getHours()).padStart(2, "0");
+      const mm = String(expiresAt.getMinutes()).padStart(2, "0");
+      $("cg_expiraLabel").textContent = hh + ":" + mm;
+      $("cg_formView").classList.add("hidden");
+      $("cg_resultView").classList.remove("hidden");
+      renderCodigosRecientes();
+      return;
+    }
+    // si fue colisión de unique, reintenta; si no, aborta
+    if (!String(error.message).includes("duplicate")) {
+      toast("Error: " + error.message);
+      return;
+    }
+  }
+  toast("No se pudo generar código, probá de nuevo");
+}
+
+async function renderCodigosRecientes() {
+  const { data, error } = await sb.from("admin_unlock_code")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(10);
+  const cont = $("cg_lista");
+  if (error || !data || !data.length) {
+    cont.innerHTML = `<div class="text-[11px] text-gray-500 italic">Sin códigos generados</div>`;
+    return;
+  }
+  const now = Date.now();
+  cont.innerHTML = data.map(c => {
+    const expired = new Date(c.expires_at).getTime() < now;
+    const status = c.used_at
+      ? `<span class="pill" style="background:#d1fae5;color:#065f46">✓ Usado</span>`
+      : expired
+      ? `<span class="pill" style="background:#fee2e2;color:#991b1b">Expirado</span>`
+      : `<span class="pill" style="background:#dbeafe;color:#1e40af">Activo</span>`;
+    return `
+      <div class="flex items-center justify-between p-2 bg-gray-50 border border-gray-200 rounded text-xs">
+        <div class="flex-1 min-w-0">
+          <div class="mono font-bold text-gray-800">${escapeHtml(c.code)}</div>
+          <div class="text-[10px] text-gray-500 truncate">
+            ${c.fecha_objetivo ? fmtFecha(c.fecha_objetivo) + " · " : "cualquier día · "}
+            ${escapeHtml(c.descripcion || "(sin nota)")}
+          </div>
+          ${c.used_at ? `<div class="text-[10px] text-green-700">Usado por ${escapeHtml(c.used_by || "?")} el ${new Date(c.used_at).toLocaleString("es-AR")}</div>` : ""}
+        </div>
+        <div class="ml-2">${status}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function copiarCodigo() {
+  const code = $("cg_codigoDisplay").textContent;
+  try {
+    await navigator.clipboard.writeText(code);
+    toast("Código copiado");
+  } catch { toast("Copiá manualmente: " + code); }
+}
+
+async function compartirCodigo() {
+  const code = $("cg_codigoDisplay").textContent;
+  const desc = $("cg_descripcion").value || "";
+  const text = `🔑 Código OiMira Caja: ${code}\n${desc}\nVálido 30 min, un solo uso.`;
+  if (navigator.share) {
+    try { await navigator.share({ title: "Código OiMira", text }); }
+    catch { /* cancelado */ }
+  } else {
+    await navigator.clipboard?.writeText(text);
+    toast("Texto copiado para compartir");
+  }
+}
+
+function wireCodigoListeners() {
+  $("codigoBtn")?.addEventListener("click", openCodigoModal);
+  $("cg_generar")?.addEventListener("click", generarCodigo);
+  $("cg_copiar")?.addEventListener("click", copiarCodigo);
+  $("cg_compartir")?.addEventListener("click", compartirCodigo);
+  $("cg_nuevo")?.addEventListener("click", () => {
+    $("cg_formView").classList.remove("hidden");
+    $("cg_resultView").classList.add("hidden");
+  });
 }
 
 // ============================================================
