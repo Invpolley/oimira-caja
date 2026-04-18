@@ -6,7 +6,8 @@ export const SUPABASE_URL = "https://ilotlgspskcqcjpnccix.supabase.co";
 export const SUPABASE_ANON_KEY = "sb_publishable_zCNn-xOyefwgj-QebLw6Kg_GdBm0xr-";
 
 // Nombre de la cajera por defecto (modificable en la UI)
-export const CAJERA_DEFAULT = "María";
+// La selección actual se guarda en localStorage key "oimira_cajera"
+export const CAJERA_DEFAULT = "Patricia";
 
 // Nombre del dispositivo (se llena automático en PWA)
 export const DEVICE_NAME = navigator.userAgent.includes("Mobile") ? "Móvil" : "PC";

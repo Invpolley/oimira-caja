@@ -7,11 +7,23 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ============================================================================
+// Persistencia simple de la cajera en localStorage
+// ============================================================================
+const CAJERA_LS_KEY = "oimira_cajera";
+function loadCajera() {
+  try { return localStorage.getItem(CAJERA_LS_KEY) || CAJERA_DEFAULT; }
+  catch { return CAJERA_DEFAULT; }
+}
+function saveCajera(nombre) {
+  try { localStorage.setItem(CAJERA_LS_KEY, nombre); } catch {}
+}
+
+// ============================================================================
 // Estado del formulario
 // ============================================================================
 const state = {
   fecha: new Date().toISOString().slice(0, 10),
-  cajera: CAJERA_DEFAULT,
+  cajera: loadCajera(),
   ingresos: [],   // [{nombre, moeda, monto, preset, id?}]
   gastos: [],     // [{descripcion, monto, moeda, categoria, id?}]
   sacosTrigo: 0,
@@ -287,8 +299,14 @@ function bindStatic() {
     renderAll();
   });
 
-  // Cajera
+  // Cajera — con persistencia entre sesiones (localStorage)
   const cajeraSel = document.getElementById("cajera");
+  // Si la cajera guardada no está en el select (ej. es un nombre custom viejo), agregarla
+  if (state.cajera && ![...cajeraSel.options].some(o => o.value === state.cajera)) {
+    const opt = document.createElement("option");
+    opt.value = state.cajera; opt.textContent = state.cajera;
+    cajeraSel.insertBefore(opt, cajeraSel.querySelector('option[value="Otra"]'));
+  }
   cajeraSel.value = state.cajera;
   cajeraSel.addEventListener("change", (e) => {
     if (e.target.value === "Otra") {
@@ -297,11 +315,16 @@ function bindStatic() {
         state.cajera = nombre;
         const opt = document.createElement("option");
         opt.value = nombre; opt.textContent = nombre; opt.selected = true;
-        cajeraSel.appendChild(opt);
+        cajeraSel.insertBefore(opt, cajeraSel.querySelector('option[value="Otra"]'));
+      } else {
+        // Si cancela el prompt, volver al valor anterior
+        cajeraSel.value = state.cajera;
+        return;
       }
     } else {
       state.cajera = e.target.value;
     }
+    saveCajera(state.cajera);    // ← persistir entre sesiones
     saveDraft();
   });
 
