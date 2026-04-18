@@ -1,0 +1,25 @@
+{
+  "name": "OiMira Caja",
+  "short_name": "OiMira Caja",
+  "description": "Cierre diario de caja para OiMira Panadería & Deli",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#d97706",
+  "background_color": "#fef3c7",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
