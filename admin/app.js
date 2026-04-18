@@ -574,6 +574,108 @@ if ("serviceWorker" in navigator) {
 }
 
 // ============================================================
+// 📥 Instalación PWA (celular + PC)
+// ============================================================
+let deferredInstallPrompt = null;
+
+function isStandalone() {
+  return window.matchMedia("(display-mode: standalone)").matches
+      || window.navigator.standalone === true; // iOS Safari
+}
+
+function detectPlatform() {
+  const ua = navigator.userAgent;
+  if (/iPad|iPhone|iPod/.test(ua)) return "ios";
+  if (/Android/.test(ua)) return "android";
+  return "desktop";
+}
+
+function showInstallButtons() {
+  // Si ya está instalada, no mostrar nada
+  if (isStandalone()) {
+    $("installBtn")?.classList.add("hidden");
+    $("installBtnGate")?.classList.add("hidden");
+    return;
+  }
+  // Mostrar botones (tanto en header como en pinGate)
+  $("installBtn")?.classList.remove("hidden");
+  $("installBtnGate")?.classList.remove("hidden");
+}
+
+function openInstallModal() {
+  const platform = detectPlatform();
+  // Ocultar todas las instrucciones
+  ["installIos","installAndroid","installDesktop","installAlready"].forEach(id => $(id).classList.add("hidden"));
+
+  if (isStandalone()) {
+    $("installAlready").classList.remove("hidden");
+    $("installNowBtn").classList.add("hidden");
+  } else if (platform === "ios") {
+    $("installIos").classList.remove("hidden");
+    $("installNowBtn").classList.add("hidden"); // iOS no soporta prompt nativo
+  } else if (platform === "android") {
+    $("installAndroid").classList.remove("hidden");
+    // Si el browser ofreció prompt, mostrar botón para dispararlo
+    if (deferredInstallPrompt) {
+      $("installNowBtn").classList.remove("hidden");
+    } else {
+      $("installNowBtn").classList.add("hidden");
+    }
+  } else {
+    $("installDesktop").classList.remove("hidden");
+    if (deferredInstallPrompt) {
+      $("installNowBtn").classList.remove("hidden");
+    } else {
+      $("installNowBtn").classList.add("hidden");
+    }
+  }
+  openModal("modalInstall");
+}
+
+async function triggerNativeInstall() {
+  if (!deferredInstallPrompt) { toast("El navegador no ofreció instalación aún"); return; }
+  deferredInstallPrompt.prompt();
+  const { outcome } = await deferredInstallPrompt.userChoice;
+  if (outcome === "accepted") {
+    toast("App instalada 🎉");
+    closeModal("modalInstall");
+    showInstallButtons();
+  } else {
+    toast("Instalación cancelada");
+  }
+  deferredInstallPrompt = null;
+}
+
+// Capturar el prompt del browser cuando esté listo
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  showInstallButtons();
+});
+
+// Cuando ya se instala, ocultamos los botones
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  showInstallButtons();
+  toast("¡App instalada en tu dispositivo!");
+});
+
+// Wire listeners de los botones
+function wireInstallListeners() {
+  $("installBtn")?.addEventListener("click", openInstallModal);
+  $("installBtnGate")?.addEventListener("click", openInstallModal);
+  $("installNowBtn")?.addEventListener("click", triggerNativeInstall);
+  // Decidir visibilidad al cargar
+  showInstallButtons();
+}
+
+// Llamar inmediato (no espera al PIN) para que el botón del gate aparezca
+document.addEventListener("DOMContentLoaded", wireInstallListeners);
+if (document.readyState === "interactive" || document.readyState === "complete") {
+  wireInstallListeners();
+}
+
+// ============================================================
 // ============================================================
 //   💰 MÓDULO SALDOS DE CAJA + RETIROS
 // ============================================================

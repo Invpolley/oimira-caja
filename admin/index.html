@@ -104,6 +104,77 @@
       Entrar
     </button>
     <p id="pinError" class="hidden text-center text-red-600 text-sm mt-2">PIN incorrecto</p>
+    <button id="installBtnGate" class="hidden mt-3 w-full py-2 border-2 border-amber-400 text-amber-700 rounded-lg font-semibold text-sm hover:bg-amber-50">
+      📥 Instalar en el celular
+    </button>
+  </div>
+</div>
+
+<!-- ================================== -->
+<!-- Modal: Instrucciones de instalación -->
+<!-- ================================== -->
+<div id="modalInstall" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl p-5 max-w-md w-full max-h-[95vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-bold text-amber-800">📥 Instalar OiMira Admin</h2>
+      <button class="close-modal text-2xl text-gray-400 hover:text-gray-700" data-modal="modalInstall">&times;</button>
+    </div>
+
+    <!-- Instrucciones iOS -->
+    <div id="installIos" class="hidden space-y-2 text-sm">
+      <p class="font-semibold text-gray-800">iPhone / iPad (Safari):</p>
+      <ol class="list-decimal list-inside space-y-1.5 text-gray-700">
+        <li>Tocá el botón <span class="inline-block px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-bold">⬆️ Compartir</span> abajo en la barra</li>
+        <li>Deslizá hacia abajo y elegí <b>"Agregar a pantalla de inicio"</b></li>
+        <li>Confirmá con <b>"Agregar"</b> arriba a la derecha</li>
+        <li>La app aparece como ícono naranja 🥖 en tu pantalla</li>
+      </ol>
+      <div class="p-2 bg-amber-50 rounded-lg text-xs text-amber-800 mt-2">
+        💡 Si estás en Chrome en iPhone, abrí esta URL en <b>Safari</b> primero.
+      </div>
+    </div>
+
+    <!-- Instrucciones Android -->
+    <div id="installAndroid" class="hidden space-y-2 text-sm">
+      <p class="font-semibold text-gray-800">Android (Chrome):</p>
+      <ol class="list-decimal list-inside space-y-1.5 text-gray-700">
+        <li>Tocá el menú <span class="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-700 rounded font-bold">⋮</span> arriba a la derecha</li>
+        <li>Elegí <b>"Instalar app"</b> o <b>"Agregar a pantalla de inicio"</b></li>
+        <li>Confirmá <b>"Instalar"</b></li>
+        <li>Aparece como app con ícono propio 🥖</li>
+      </ol>
+      <div class="p-2 bg-green-50 rounded-lg text-xs text-green-800 mt-2">
+        ✅ Si el navegador lo soporta, va a aparecer un prompt directo al tocar "Instalar" — acepta y listo.
+      </div>
+    </div>
+
+    <!-- Instrucciones Desktop -->
+    <div id="installDesktop" class="hidden space-y-2 text-sm">
+      <p class="font-semibold text-gray-800">PC (Chrome / Edge):</p>
+      <ol class="list-decimal list-inside space-y-1.5 text-gray-700">
+        <li>En la barra de direcciones, a la derecha, vas a ver el ícono <span class="inline-block px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-bold">⊕</span> o <b>Instalar</b></li>
+        <li>Clickeá y aceptá "Instalar"</li>
+        <li>La app abre en su propia ventana (sin barra de navegador)</li>
+      </ol>
+    </div>
+
+    <!-- Instalado ya -->
+    <div id="installAlready" class="hidden space-y-2 text-sm">
+      <div class="p-4 bg-green-50 rounded-lg text-center">
+        <div class="text-3xl mb-1">✅</div>
+        <p class="font-semibold text-green-800">Ya está instalada</p>
+        <p class="text-xs text-green-700 mt-1">Estás usando la app en modo standalone. Podés seguir.</p>
+      </div>
+    </div>
+
+    <!-- Botón de instalación nativa (Android solo) -->
+    <button id="installNowBtn" class="hidden mt-4 w-full py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-xl font-bold text-base shadow">
+      📥 Instalar ahora
+    </button>
+
+    <button class="close-modal mt-3 w-full py-2 border-2 border-gray-300 rounded-lg font-semibold" data-modal="modalInstall">
+      Cerrar
+    </button>
   </div>
 </div>
 
@@ -125,9 +196,14 @@
         <span id="statusDot" class="inline-block w-2 h-2 rounded-full online-dot"></span>
         <span id="statusText">Conectado</span>
       </div>
-      <button id="logoutBtn" class="mt-1 bg-white/20 border border-white/30 rounded px-2 py-0.5 text-xs hover:bg-white/30">
-        Salir
-      </button>
+      <div class="flex gap-1 mt-1 justify-end">
+        <button id="installBtn" class="hidden bg-white text-amber-700 border border-white rounded px-2 py-0.5 text-xs font-semibold hover:bg-amber-50" title="Instalar como app">
+          📥 Instalar
+        </button>
+        <button id="logoutBtn" class="bg-white/20 border border-white/30 rounded px-2 py-0.5 text-xs hover:bg-white/30">
+          Salir
+        </button>
+      </div>
     </div>
   </div>
 </header>
