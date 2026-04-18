@@ -16,6 +16,8 @@ const state = {
   expanded: new Set(),
   allExpanded: false,
   chart: null,
+  cajaCharts: {},      // { efectivo, punto, puntoBr, usd }
+  evolMetric: "total", // "total" o "hoy"
 };
 
 // ============================================================
@@ -476,6 +478,7 @@ async function reload() {
     renderPorCategoria();
     renderCajaSaldos();
     renderCajaRetiros();
+    renderCajaEvolucion();
   } catch (e) {
     console.error(e);
   }
@@ -698,6 +701,130 @@ function canalIcon(c) {
   return { Efectivo: "💵", Punto: "📲", PuntoBr: "💳", USD: "💵", BCU: "🏦" }[c] || "💰";
 }
 
+// ============================================================
+// 📈 Evolución por canal (4 sparklines)
+// ============================================================
+function renderCajaEvolucion() {
+  const data = [...state.cajaSaldos].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const empty = data.length === 0;
+  $("evolEmpty").classList.toggle("hidden", !empty);
+
+  const series = {
+    efectivo: {
+      canvas: "chartEfectivo", color: "#16a34a", bg: "rgba(22,163,74,0.15)",
+      fmt: fmtR,
+      totalField: "efectivo_saldo_total", hoyField: "efectivo_hoy",
+      lastEl: "evolEfectivoLast", deltaEl: "evolEfectivoDelta", rangeEl: "evolEfectivoRange",
+    },
+    punto: {
+      canvas: "chartPunto", color: "#3b82f6", bg: "rgba(59,130,246,0.15)",
+      fmt: fmtB,
+      totalField: "punto_saldo_total", hoyField: "punto_hoy",
+      lastEl: "evolPuntoLast", deltaEl: "evolPuntoDelta", rangeEl: "evolPuntoRange",
+    },
+    puntoBr: {
+      canvas: "chartPuntoBr", color: "#d97706", bg: "rgba(217,119,6,0.15)",
+      fmt: fmtR,
+      totalField: "punto_br_saldo_total", hoyField: "punto_br_hoy",
+      lastEl: "evolPuntoBrLast", deltaEl: "evolPuntoBrDelta", rangeEl: "evolPuntoBrRange",
+    },
+    usd: {
+      canvas: "chartUsd", color: "#059669", bg: "rgba(5,150,105,0.15)",
+      fmt: fmtU,
+      totalField: "usd_saldo_total", hoyField: "usd_hoy",
+      lastEl: "evolUsdLast", deltaEl: "evolUsdDelta", rangeEl: "evolUsdRange",
+    },
+  };
+
+  for (const [key, cfg] of Object.entries(series)) {
+    drawSparkline(key, cfg, data);
+  }
+}
+
+function drawSparkline(key, cfg, data) {
+  const labels = data.map(d => fmtFecha(d.fecha));
+  const field = state.evolMetric === "hoy" ? cfg.hoyField : cfg.totalField;
+  const values = data.map(d => Number(d[field] || 0));
+
+  // Último valor + delta vs primero
+  const last = values.length ? values[values.length - 1] : 0;
+  const first = values.length ? values[0] : 0;
+  const delta = last - first;
+  $(cfg.lastEl).textContent = cfg.fmt(last);
+
+  const deltaEl = $(cfg.deltaEl);
+  if (values.length >= 2) {
+    const arrow = delta > 0 ? "▲" : delta < 0 ? "▼" : "—";
+    const color = delta > 0 ? "text-green-600" : delta < 0 ? "text-red-600" : "text-gray-500";
+    deltaEl.className = "text-[10px] " + color + " font-semibold";
+    deltaEl.textContent = `${arrow} ${cfg.fmt(Math.abs(delta))}`;
+  } else {
+    deltaEl.textContent = "\u00a0"; // nbsp
+    deltaEl.className = "text-[10px]";
+  }
+
+  $(cfg.rangeEl).textContent = data.length
+    ? `${fmtFecha(data[0].fecha)} → ${fmtFecha(data[data.length-1].fecha)} · ${data.length} día${data.length === 1 ? "" : "s"}`
+    : "—";
+
+  // Chart
+  const ctx = $(cfg.canvas).getContext("2d");
+  if (state.cajaCharts[key]) state.cajaCharts[key].destroy();
+
+  // Si no hay datos, dibujamos un placeholder vacío
+  if (!values.length) {
+    state.cajaCharts[key] = new Chart(ctx, {
+      type: "line",
+      data: { labels: [], datasets: [] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } },
+    });
+    return;
+  }
+
+  state.cajaCharts[key] = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        borderColor: cfg.color,
+        backgroundColor: cfg.bg,
+        borderWidth: 2,
+        tension: 0.3,
+        fill: true,
+        pointRadius: values.length <= 7 ? 3 : 2,
+        pointHoverRadius: 5,
+        pointBackgroundColor: cfg.color,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          displayColors: false,
+          callbacks: {
+            label: (ctx) => cfg.fmt(ctx.parsed.y),
+          },
+        },
+      },
+      scales: {
+        y: {
+          beginAtZero: state.evolMetric === "hoy",
+          ticks: { font: { size: 9 }, maxTicksLimit: 4 },
+          grid: { color: "rgba(0,0,0,0.05)" },
+        },
+        x: {
+          ticks: { font: { size: 9 }, maxTicksLimit: 6, autoSkip: true },
+          grid: { display: false },
+        },
+      },
+      interaction: { mode: "nearest", intersect: false },
+    },
+  });
+}
+
 // ------------- Modal helpers -------------
 function openModal(id) { $(id).classList.remove("hidden"); }
 function closeModal(id) { $(id).classList.add("hidden"); }
@@ -838,6 +965,20 @@ function wireCajaListeners() {
    "cc_puntobr_ant","cc_puntobr_hoy",
    "cc_usd_ant","cc_usd_hoy"].forEach(id => {
     $(id).addEventListener("input", recalcCC);
+  });
+
+  // Toggle evolución: Saldo total vs Entrada del día
+  document.querySelectorAll(".evol-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.evolMetric = btn.dataset.metric;
+      document.querySelectorAll(".evol-btn").forEach(b => {
+        b.classList.remove("bg-amber-500", "text-white");
+        b.classList.add("bg-gray-200");
+      });
+      btn.classList.remove("bg-gray-200");
+      btn.classList.add("bg-amber-500", "text-white");
+      renderCajaEvolucion();
+    });
   });
 }
 

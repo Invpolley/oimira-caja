@@ -249,6 +249,86 @@
     </div>
   </div>
 
+  <!-- ============================== -->
+  <!-- 📈 Evolución por canal          -->
+  <!-- ============================== -->
+  <div class="bg-white rounded-xl p-3 card">
+    <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+      <div>
+        <h2 class="text-base font-bold text-amber-800">📈 Evolución por canal</h2>
+        <p class="text-xs text-gray-500">Saldo acumulado diario de cada caja en el rango seleccionado</p>
+      </div>
+      <div class="flex gap-1 text-xs" id="evolMetricBtns">
+        <button data-metric="total" class="evol-btn px-2 py-1 bg-amber-500 text-white rounded font-semibold">Saldo total</button>
+        <button data-metric="hoy" class="evol-btn px-2 py-1 bg-gray-200 rounded font-semibold">Entrada del día</button>
+      </div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <!-- Efectivo R$ -->
+      <div class="bg-green-50 border-2 border-green-200 rounded-lg p-3">
+        <div class="flex items-start justify-between mb-1">
+          <div>
+            <div class="text-xs font-bold text-green-800">💵 Efectivo R$</div>
+            <div class="text-[10px] text-gray-500" id="evolEfectivoRange">—</div>
+          </div>
+          <div class="text-right">
+            <div class="mono font-bold text-green-700" id="evolEfectivoLast">R$ 0</div>
+            <div class="text-[10px]" id="evolEfectivoDelta">&nbsp;</div>
+          </div>
+        </div>
+        <div class="relative" style="height:110px;"><canvas id="chartEfectivo"></canvas></div>
+      </div>
+
+      <!-- Punto (Pago Móvil Bs) -->
+      <div class="bg-blue-50 border-2 border-blue-200 rounded-lg p-3">
+        <div class="flex items-start justify-between mb-1">
+          <div>
+            <div class="text-xs font-bold text-blue-800">📲 Punto (Pago Móvil Bs)</div>
+            <div class="text-[10px] text-gray-500" id="evolPuntoRange">—</div>
+          </div>
+          <div class="text-right">
+            <div class="mono font-bold text-blue-700" id="evolPuntoLast">Bs 0</div>
+            <div class="text-[10px]" id="evolPuntoDelta">&nbsp;</div>
+          </div>
+        </div>
+        <div class="relative" style="height:110px;"><canvas id="chartPunto"></canvas></div>
+      </div>
+
+      <!-- Punto Br (POS R$) -->
+      <div class="bg-amber-50 border-2 border-amber-200 rounded-lg p-3">
+        <div class="flex items-start justify-between mb-1">
+          <div>
+            <div class="text-xs font-bold text-amber-800">💳 Punto Br (POS R$)</div>
+            <div class="text-[10px] text-gray-500" id="evolPuntoBrRange">—</div>
+          </div>
+          <div class="text-right">
+            <div class="mono font-bold text-amber-700" id="evolPuntoBrLast">R$ 0</div>
+            <div class="text-[10px]" id="evolPuntoBrDelta">&nbsp;</div>
+          </div>
+        </div>
+        <div class="relative" style="height:110px;"><canvas id="chartPuntoBr"></canvas></div>
+      </div>
+
+      <!-- USD -->
+      <div class="bg-emerald-50 border-2 border-emerald-200 rounded-lg p-3">
+        <div class="flex items-start justify-between mb-1">
+          <div>
+            <div class="text-xs font-bold text-emerald-800">💵 USD</div>
+            <div class="text-[10px] text-gray-500" id="evolUsdRange">—</div>
+          </div>
+          <div class="text-right">
+            <div class="mono font-bold text-emerald-700" id="evolUsdLast">US$ 0</div>
+            <div class="text-[10px]" id="evolUsdDelta">&nbsp;</div>
+          </div>
+        </div>
+        <div class="relative" style="height:110px;"><canvas id="chartUsd"></canvas></div>
+      </div>
+    </div>
+    <div id="evolEmpty" class="hidden text-center text-gray-500 py-4 text-sm italic">
+      📭 Sin cierres de caja en este rango — cargá al menos un "Cierre de caja" para ver la evolución.
+    </div>
+  </div>
+
   <!-- Gráfico de evolución -->
   <div class="bg-white rounded-xl p-3 card">
     <div class="flex items-center justify-between mb-2">
