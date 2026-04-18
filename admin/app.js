@@ -1013,21 +1013,187 @@ async function guardarCierreCaja() {
   reload();
 }
 
-// ------------- Retiro -------------
+// ------------- Retiro (flujo paso-a-paso) -------------
+const RETIRO_STATE = {
+  moeda: null,   // "R$" | "Bs" | "USD"
+  canal: null,   // "Efectivo" | "Punto" | "PuntoBr" | "USD" | "BCU"
+};
+
+// Canales disponibles por moneda con label + ícono
+const CANALES_POR_MOEDA = {
+  "R$": [
+    { canal: "Efectivo", label: "Efectivo R$ (caja física)",   icon: "💵" },
+    { canal: "PuntoBr",  label: "Punto Br — POS Brasil",        icon: "💳" },
+    { canal: "BCU",      label: "B.C.U — Cuenta BNC",           icon: "🏦" },
+  ],
+  "Bs": [
+    { canal: "Punto",    label: "Punto — Pago Móvil",           icon: "📲" },
+  ],
+  "USD": [
+    { canal: "USD",      label: "USD — Dólares físicos",        icon: "💵" },
+  ],
+};
+
 async function openRetiroModal() {
+  // Reset
+  RETIRO_STATE.moeda = null;
+  RETIRO_STATE.canal = null;
   $("rt_fecha").value = todayISO();
   $("rt_monto").value = "";
   $("rt_destino").value = "";
   $("rt_nota").value = "";
-  $("rt_canal").value = "Efectivo|R$";
   $("rt_motivo").value = "Pago proveedor";
+  $("rt_montoMoedaLabel").textContent = "—";
+
+  // Hide all steps except the first
+  ["rt_canalStep","rt_montoStep","rt_motivoStep","rt_notaStep","rt_resumen"].forEach(id => $(id).classList.add("hidden"));
+  $("rt_guardar").disabled = true;
+
+  // Reset highlight de botones de moneda
+  document.querySelectorAll(".rt-moeda-btn").forEach(b => b.classList.remove("ring-4","ring-rose-400"));
+
   openModal("modalRetiro");
 }
 
+function selectMoeda(moeda) {
+  RETIRO_STATE.moeda = moeda;
+  RETIRO_STATE.canal = null;
+
+  // Highlight botón seleccionado
+  document.querySelectorAll(".rt-moeda-btn").forEach(b => {
+    b.classList.toggle("ring-4", b.dataset.moeda === moeda);
+    b.classList.toggle("ring-rose-400", b.dataset.moeda === moeda);
+  });
+
+  $("rt_montoMoedaLabel").textContent = "Monto en " + moeda;
+
+  // Renderizar canales disponibles para esta moneda
+  const cont = $("rt_canalOptions");
+  const canales = CANALES_POR_MOEDA[moeda] || [];
+  cont.innerHTML = canales.map(c => `
+    <button type="button" data-canal="${c.canal}"
+            class="rt-canal-btn flex items-center gap-2 p-2.5 border-2 border-gray-300 rounded-lg text-left hover:border-rose-400 hover:bg-rose-50 transition">
+      <span class="text-xl">${c.icon}</span>
+      <div class="flex-1">
+        <div class="font-semibold text-gray-800 text-sm">${escapeHtml(c.label)}</div>
+        <div class="text-[11px] text-gray-500 saldo-canal" data-canal="${c.canal}">Cargando saldo...</div>
+      </div>
+    </button>
+  `).join("");
+
+  // Wire clicks
+  cont.querySelectorAll(".rt-canal-btn").forEach(btn => {
+    btn.addEventListener("click", () => selectCanal(btn.dataset.canal));
+  });
+
+  // Mostrar saldo actual de cada canal (desde el último cierre disponible)
+  renderSaldosEnCanales();
+
+  // Mostrar paso 2
+  $("rt_canalStep").classList.remove("hidden");
+  // Ocultar pasos siguientes hasta que elijan canal
+  ["rt_montoStep","rt_motivoStep","rt_notaStep","rt_resumen"].forEach(id => $(id).classList.add("hidden"));
+  $("rt_guardar").disabled = true;
+}
+
+function renderSaldosEnCanales() {
+  const latest = state.cajaSaldos[0];
+  if (!latest) return;
+  const mapSaldos = {
+    Efectivo: [latest.efectivo_saldo_total, "R$"],
+    Punto: [latest.punto_saldo_total, "Bs"],
+    PuntoBr: [latest.punto_br_saldo_total, "R$"],
+    USD: [latest.usd_saldo_total, "USD"],
+    BCU: [latest.bcu_saldo, "R$"],
+  };
+  document.querySelectorAll(".saldo-canal").forEach(el => {
+    const c = el.dataset.canal;
+    const [v, m] = mapSaldos[c] || [0, ""];
+    el.textContent = "Saldo disponible: " + fmtMoeda(v, m);
+  });
+}
+
+function selectCanal(canal) {
+  RETIRO_STATE.canal = canal;
+
+  // Highlight
+  document.querySelectorAll(".rt-canal-btn").forEach(b => {
+    b.classList.toggle("border-rose-500", b.dataset.canal === canal);
+    b.classList.toggle("bg-rose-100", b.dataset.canal === canal);
+  });
+
+  // Mostrar saldo disponible del canal elegido
+  const latest = state.cajaSaldos[0];
+  if (latest) {
+    const saldoMap = {
+      Efectivo: latest.efectivo_saldo_total,
+      Punto: latest.punto_saldo_total,
+      PuntoBr: latest.punto_br_saldo_total,
+      USD: latest.usd_saldo_total,
+      BCU: latest.bcu_saldo,
+    };
+    const saldo = saldoMap[canal] || 0;
+    $("rt_canalSaldo").textContent = "💡 Saldo disponible en " + canalLabel(canal) + ": " + fmtMoeda(saldo, RETIRO_STATE.moeda);
+  } else {
+    $("rt_canalSaldo").textContent = "⚠️ No hay cierre de caja registrado aún en este rango.";
+  }
+
+  // Desbloquear pasos 3, 4, 5
+  ["rt_montoStep","rt_motivoStep","rt_notaStep"].forEach(id => $(id).classList.remove("hidden"));
+  actualizarResumenRetiro();
+  $("rt_monto").focus();
+}
+
+function actualizarResumenRetiro() {
+  const m = RETIRO_STATE;
+  const monto = Number($("rt_monto").value || 0);
+  const nota = $("rt_nota").value.trim();
+  const motivo = $("rt_motivo").value;
+  const destino = $("rt_destino").value.trim();
+
+  const ok = m.moeda && m.canal && monto > 0 && nota.length >= 3;
+
+  if (m.moeda && m.canal && monto > 0) {
+    $("rt_resumen").classList.remove("hidden");
+    $("rt_resumenTexto").innerHTML = `
+      Sale <b>${fmtMoeda(monto, m.moeda)}</b> de <b>${escapeHtml(canalLabel(m.canal))}</b><br>
+      ${escapeHtml(motivo)}${destino ? " → " + escapeHtml(destino) : ""}<br>
+      ${nota ? "💬 " + escapeHtml(nota) : '<span class="text-rose-700">⚠ Falta nota de uso</span>'}
+    `;
+  } else {
+    $("rt_resumen").classList.add("hidden");
+  }
+
+  $("rt_guardar").disabled = !ok;
+}
+
 async function guardarRetiro() {
-  const [canal, moeda] = $("rt_canal").value.split("|");
+  const { moeda, canal } = RETIRO_STATE;
   const monto = Number($("rt_monto").value);
+  const nota = $("rt_nota").value.trim();
+
+  // Validaciones
+  if (!moeda) { toast("Elegí la moneda"); return; }
+  if (!canal) { toast("Elegí de qué caja sale"); return; }
   if (!monto || monto <= 0) { toast("Monto inválido"); return; }
+  if (!nota || nota.length < 3) { toast("Poné una nota de en qué se usó el dinero"); return; }
+
+  // Chequeo saldo (warning, no bloqueo — puede ser que cargues el movimiento antes del cierre)
+  const latest = state.cajaSaldos[0];
+  if (latest) {
+    const saldoMap = {
+      Efectivo: latest.efectivo_saldo_total,
+      Punto: latest.punto_saldo_total,
+      PuntoBr: latest.punto_br_saldo_total,
+      USD: latest.usd_saldo_total,
+      BCU: latest.bcu_saldo,
+    };
+    const disponible = Number(saldoMap[canal] || 0);
+    if (monto > disponible) {
+      if (!confirm(`⚠ El monto (${fmtMoeda(monto, moeda)}) supera el saldo disponible (${fmtMoeda(disponible, moeda)}) en ${canalLabel(canal)}. ¿Guardar igual?`)) return;
+    }
+  }
+
   const fecha = $("rt_fecha").value;
 
   // Buscar caja_saldo_id del día (si existe) para vincular
@@ -1043,13 +1209,13 @@ async function guardarRetiro() {
     monto,
     motivo: $("rt_motivo").value,
     destino: $("rt_destino").value || null,
-    nota: $("rt_nota").value || null,
+    nota,
   };
 
   const { error } = await sb.from("caja_retiro").insert(payload);
   if (error) { toast("Error: " + error.message, 4000); return; }
 
-  toast("Retiro registrado");
+  toast(`Retiro de ${fmtMoeda(monto, moeda)} registrado`);
   closeModal("modalRetiro");
   reload();
 }
@@ -1061,12 +1227,22 @@ function wireCajaListeners() {
   $("nuevoRetiroBtn").addEventListener("click", openRetiroModal);
   $("cc_guardar").addEventListener("click", guardarCierreCaja);
   $("rt_guardar").addEventListener("click", guardarRetiro);
-  // Recalc en vivo
+  // Recalc en vivo del cierre de caja
   ["cc_efectivo_ant","cc_efectivo_hoy","cc_gastos_efectivo",
    "cc_punto_ant","cc_punto_hoy",
    "cc_puntobr_ant","cc_puntobr_hoy",
    "cc_usd_ant","cc_usd_hoy"].forEach(id => {
     $(id).addEventListener("input", recalcCC);
+  });
+
+  // Retiro: selector de moneda
+  document.querySelectorAll(".rt-moeda-btn").forEach(btn => {
+    btn.addEventListener("click", () => selectMoeda(btn.dataset.moeda));
+  });
+  // Retiro: validación en vivo del resumen
+  ["rt_monto","rt_nota","rt_motivo","rt_destino"].forEach(id => {
+    $(id).addEventListener("input", actualizarResumenRetiro);
+    $(id).addEventListener("change", actualizarResumenRetiro);
   });
 
   // Toggle evolución: Saldo total vs Entrada del día

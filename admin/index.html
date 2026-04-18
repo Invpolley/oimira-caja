@@ -592,32 +592,55 @@
       <h2 class="text-lg font-bold text-rose-700">💸 Retiro / salida de caja</h2>
       <button class="close-modal text-2xl text-gray-400 hover:text-gray-700" data-modal="modalRetiro">&times;</button>
     </div>
-    <p class="text-xs text-gray-500 mb-3">Registrá pagos a proveedores, transferencias al banco, retiros propios, etc. Se descuenta del canal elegido.</p>
+    <p class="text-xs text-gray-500 mb-3">Sólo el administrador registra retiros. Se descuenta del canal y moneda que elijas.</p>
 
     <div class="space-y-3">
+      <!-- Paso 1: Moneda -->
       <div>
-        <label class="text-xs font-semibold text-gray-700">📅 Fecha</label>
-        <input type="date" id="rt_fecha" class="w-full p-2 border-2 border-gray-300 rounded-lg"/>
+        <label class="text-xs font-semibold text-gray-700 block mb-1">1️⃣ ¿En qué moneda?</label>
+        <div class="grid grid-cols-3 gap-2" id="rt_moedaGroup">
+          <button type="button" data-moeda="R$"
+                  class="rt-moeda-btn p-3 border-2 border-amber-300 bg-amber-50 rounded-lg font-bold text-amber-800 hover:bg-amber-100">
+            R$<div class="text-[10px] font-normal text-gray-600">Reales</div>
+          </button>
+          <button type="button" data-moeda="Bs"
+                  class="rt-moeda-btn p-3 border-2 border-blue-300 bg-blue-50 rounded-lg font-bold text-blue-800 hover:bg-blue-100">
+            Bs<div class="text-[10px] font-normal text-gray-600">Bolívares</div>
+          </button>
+          <button type="button" data-moeda="USD"
+                  class="rt-moeda-btn p-3 border-2 border-emerald-300 bg-emerald-50 rounded-lg font-bold text-emerald-800 hover:bg-emerald-100">
+            US$<div class="text-[10px] font-normal text-gray-600">Dólares</div>
+          </button>
+        </div>
       </div>
 
-      <div>
-        <label class="text-xs font-semibold text-gray-700">💳 De qué canal sale</label>
-        <select id="rt_canal" class="w-full p-2 border-2 border-gray-300 rounded-lg font-semibold">
-          <option value="Efectivo|R$">💵 Efectivo R$ (caja física)</option>
-          <option value="Punto|Bs">📲 Punto — Pago Móvil (Bs)</option>
-          <option value="PuntoBr|R$">💳 Punto Br — POS Brasil (R$)</option>
-          <option value="USD|USD">💵 USD</option>
-          <option value="BCU|R$">🏦 B.C.U (BNC R$)</option>
-        </select>
+      <!-- Paso 2: Canal (filtrado por moneda) -->
+      <div id="rt_canalStep" class="hidden">
+        <label class="text-xs font-semibold text-gray-700 block mb-1">2️⃣ ¿De qué caja sale?</label>
+        <div id="rt_canalOptions" class="grid grid-cols-1 gap-1.5"></div>
+        <p id="rt_canalSaldo" class="text-[11px] text-gray-500 mt-1"></p>
       </div>
 
-      <div>
-        <label class="text-xs font-semibold text-gray-700">💰 Monto</label>
-        <input type="number" step="0.01" id="rt_monto" class="w-full p-3 border-2 border-rose-300 rounded-lg text-right mono text-xl font-bold" placeholder="0.00"/>
+      <!-- Paso 3: Monto + Fecha -->
+      <div id="rt_montoStep" class="hidden">
+        <label class="text-xs font-semibold text-gray-700 block mb-1">3️⃣ ¿Cuánto?</label>
+        <div class="flex gap-2">
+          <div class="flex-1">
+            <input type="number" step="0.01" id="rt_monto"
+                   class="w-full p-3 border-2 border-rose-300 rounded-lg text-right mono text-xl font-bold"
+                   placeholder="0.00"/>
+            <div class="text-[10px] text-gray-500 mt-0.5"><span id="rt_montoMoedaLabel">—</span></div>
+          </div>
+          <div>
+            <input type="date" id="rt_fecha" class="p-2 border-2 border-gray-300 rounded-lg text-sm"/>
+            <div class="text-[10px] text-gray-500 mt-0.5">Fecha</div>
+          </div>
+        </div>
       </div>
 
-      <div>
-        <label class="text-xs font-semibold text-gray-700">🎯 Motivo</label>
+      <!-- Paso 4: Motivo rápido + destino -->
+      <div id="rt_motivoStep" class="hidden">
+        <label class="text-xs font-semibold text-gray-700 block mb-1">4️⃣ Categoría rápida</label>
         <select id="rt_motivo" class="w-full p-2 border-2 border-gray-300 rounded-lg">
           <option>Pago proveedor</option>
           <option>Transferencia al banco (BNC)</option>
@@ -625,23 +648,39 @@
           <option>Pago empleado</option>
           <option>Compra insumos</option>
           <option>Cambio de moneda</option>
+          <option>Gasto operativo</option>
           <option>Otro</option>
         </select>
+        <input type="text" id="rt_destino"
+               class="mt-2 w-full p-2 border-2 border-gray-300 rounded-lg text-sm"
+               placeholder="Destino / A quién (opcional): ej. Proveedor X, BNC, Yo mismo..."/>
       </div>
 
-      <div>
-        <label class="text-xs font-semibold text-gray-700">📍 Destino (opcional)</label>
-        <input type="text" id="rt_destino" class="w-full p-2 border-2 border-gray-300 rounded-lg" placeholder="Ej: Proveedor X, BNC, Yo mismo..."/>
+      <!-- Paso 5: ¿En qué se usó? (obligatorio) -->
+      <div id="rt_notaStep" class="hidden">
+        <label class="text-xs font-semibold text-rose-700 block mb-1">
+          5️⃣ ¿En qué se usó el dinero? <span class="text-rose-600">*</span>
+        </label>
+        <textarea id="rt_nota" rows="3"
+                  class="w-full p-3 border-2 border-rose-300 rounded-lg text-sm"
+                  placeholder="Obligatorio. Ej: Compra de harina de trigo, 5 sacos, a Don Pedro. Factura #123."></textarea>
+        <p class="text-[10px] text-gray-500 mt-0.5">
+          Descripción clara del gasto — queda en el historial para tu contabilidad.
+        </p>
       </div>
 
-      <div>
-        <label class="text-xs font-semibold text-gray-700">📝 Nota (opcional)</label>
-        <textarea id="rt_nota" rows="2" class="w-full p-2 border-2 border-gray-300 rounded-lg text-sm" placeholder="Detalle adicional..."></textarea>
+      <!-- Resumen y botones -->
+      <div id="rt_resumen" class="hidden p-3 bg-rose-50 border border-rose-300 rounded-lg text-sm">
+        <div class="font-semibold text-rose-900 mb-1">📋 Resumen del retiro:</div>
+        <div id="rt_resumenTexto" class="text-rose-800"></div>
       </div>
 
       <div class="flex gap-2 pt-1">
         <button class="close-modal flex-1 py-2 border-2 border-gray-300 rounded-lg font-semibold" data-modal="modalRetiro">Cancelar</button>
-        <button id="rt_guardar" class="flex-1 py-2 bg-rose-600 text-white rounded-lg font-bold">Registrar retiro</button>
+        <button id="rt_guardar" disabled
+                class="flex-1 py-2 bg-rose-600 text-white rounded-lg font-bold disabled:bg-gray-300 disabled:cursor-not-allowed">
+          Registrar retiro
+        </button>
       </div>
     </div>
   </div>
