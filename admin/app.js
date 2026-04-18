@@ -9,6 +9,8 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // ============================================================
 const state = {
   cierres: [],      // array de dia_cierre con joins
+  cajaSaldos: [],   // array de caja_saldo_resumen
+  cajaRetiros: [],  // array de caja_retiro
   rango: { desde: null, hasta: null },
   chartMode: "ingresos",
   expanded: new Set(),
@@ -22,7 +24,9 @@ const state = {
 const $ = (id) => document.getElementById(id);
 const fmtR = (n) => "R$ " + (Number(n) || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtB = (n) => "Bs " + (Number(n) || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtU = (n) => "US$ " + (Number(n) || 0).toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const fmtN = (n) => (Number(n) || 0).toLocaleString("es-AR");
+const fmtMoeda = (n, m) => m === "Bs" ? fmtB(n) : m === "USD" ? fmtU(n) : fmtR(n);
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const daysAgo = (n) => {
   const d = new Date();
@@ -454,7 +458,14 @@ async function reload() {
   $("diasList").innerHTML = "";
   $("emptyState").classList.add("hidden");
   try {
-    state.cierres = await fetchCierres(state.rango.desde, state.rango.hasta);
+    const [cierres, cajaSaldos, cajaRetiros] = await Promise.all([
+      fetchCierres(state.rango.desde, state.rango.hasta),
+      fetchCajaSaldos(state.rango.desde, state.rango.hasta),
+      fetchCajaRetiros(state.rango.desde, state.rango.hasta),
+    ]);
+    state.cierres = cierres;
+    state.cajaSaldos = cajaSaldos;
+    state.cajaRetiros = cajaRetiros;
     state.expanded.clear();
     state.allExpanded = false;
     $("toggleAllBtn").textContent = "Expandir todo";
@@ -463,6 +474,8 @@ async function reload() {
     renderDias();
     renderPorCajera();
     renderPorCategoria();
+    renderCajaSaldos();
+    renderCajaRetiros();
   } catch (e) {
     console.error(e);
   }
@@ -541,6 +554,9 @@ function init() {
   setInterval(() => {
     if (!document.hidden) reload();
   }, 60000);
+
+  // Wire del módulo de caja (modales, retiros, etc)
+  wireCajaListeners();
 }
 
 // ============================================================
@@ -551,6 +567,277 @@ if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").catch(err => {
       console.warn("SW register failed:", err);
     });
+  });
+}
+
+// ============================================================
+// ============================================================
+//   💰 MÓDULO SALDOS DE CAJA + RETIROS
+// ============================================================
+// ============================================================
+
+async function fetchCajaSaldos(desde, hasta) {
+  const { data, error } = await sb
+    .from("caja_saldo_resumen")
+    .select("*")
+    .gte("fecha", desde)
+    .lte("fecha", hasta)
+    .order("fecha", { ascending: false });
+  if (error) { console.error(error); toast("Error cargando caja: " + error.message); return []; }
+  return data || [];
+}
+
+async function fetchCajaRetiros(desde, hasta) {
+  const { data, error } = await sb
+    .from("caja_retiro")
+    .select("*")
+    .gte("fecha", desde)
+    .lte("fecha", hasta)
+    .order("created_at", { ascending: false });
+  if (error) { console.error(error); return []; }
+  return data || [];
+}
+
+async function fetchUltimoSaldo(beforeFecha) {
+  // Trae el último cierre ANTES de la fecha para autocompletar "saldos ant."
+  const { data, error } = await sb
+    .from("caja_saldo_resumen")
+    .select("*")
+    .lt("fecha", beforeFecha)
+    .order("fecha", { ascending: false })
+    .limit(1);
+  if (error || !data || !data.length) return null;
+  return data[0];
+}
+
+// ------------- Render cards -------------
+function renderCajaSaldos() {
+  // El card superior muestra los saldos del último cierre disponible (más reciente)
+  const latest = state.cajaSaldos[0];
+  const label = $("cajaFechaLabel");
+  if (!latest) {
+    label.textContent = "Sin cierres de caja en este rango";
+    $("cajaEfectivo").textContent = fmtR(0);
+    $("cajaPunto").textContent = fmtB(0);
+    $("cajaPuntoBr").textContent = fmtR(0);
+    $("cajaUsd").textContent = fmtU(0);
+    $("cajaBcu").textContent = fmtR(0);
+    $("cajaTotalEfectivo").textContent = fmtR(0);
+    $("cajaRecargas").textContent = "—";
+    ["cajaEfectivoDetail","cajaPuntoDetail","cajaPuntoBrDetail","cajaUsdDetail"].forEach(id => $(id).textContent = "");
+    return;
+  }
+  label.textContent = `Último cierre: ${fmtFecha(latest.fecha)} · Polley`;
+
+  // Efectivo
+  $("cajaEfectivo").textContent = fmtR(latest.efectivo_saldo_total);
+  $("cajaEfectivoDetail").textContent = `ant ${fmtN(latest.efectivo_saldo_ant)} + hoy ${fmtN(latest.efectivo_hoy)}${Number(latest.gastos_efectivo_hoy) > 0 ? " − gastos " + fmtN(latest.gastos_efectivo_hoy) : ""}`;
+
+  // Punto (Bs)
+  $("cajaPunto").textContent = fmtB(latest.punto_saldo_total);
+  $("cajaPuntoDetail").textContent = `ant ${fmtN(latest.punto_saldo_ant)} + hoy ${fmtN(latest.punto_hoy)}`;
+
+  // Punto Br (R$)
+  $("cajaPuntoBr").textContent = fmtR(latest.punto_br_saldo_total);
+  $("cajaPuntoBrDetail").textContent = `ant ${fmtN(latest.punto_br_saldo_ant)} + hoy ${fmtN(latest.punto_br_hoy)}`;
+
+  // USD
+  $("cajaUsd").textContent = fmtU(latest.usd_saldo_total);
+  $("cajaUsdDetail").textContent = `ant ${fmtN(latest.usd_saldo_ant)} + hoy ${fmtN(latest.usd_hoy)}`;
+
+  // BCU
+  $("cajaBcu").textContent = fmtR(latest.bcu_saldo);
+
+  // Total
+  $("cajaTotalEfectivo").textContent = fmtR(latest.efectivo_saldo_total);
+  $("cajaRecargas").textContent = Number(latest.transf_recarga || 0) > 0
+    ? fmtMoeda(latest.transf_recarga, latest.transf_recarga_moeda || "R$")
+    : "—";
+}
+
+function renderCajaRetiros() {
+  const cont = $("cajaRetirosList");
+  if (!state.cajaRetiros.length) {
+    cont.innerHTML = `<div class="text-xs text-gray-500 italic">Sin retiros en el período</div>`;
+    return;
+  }
+  cont.innerHTML = state.cajaRetiros.map(r => `
+    <div class="flex items-center justify-between bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 text-sm">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="pill pill-gas">${canalIcon(r.canal)} ${escapeHtml(canalLabel(r.canal))}</span>
+          <span class="font-semibold text-rose-900 truncate">${escapeHtml(r.motivo || "Sin motivo")}</span>
+        </div>
+        <div class="text-[11px] text-gray-600 mt-0.5">
+          ${fmtFecha(r.fecha)}${r.destino ? " · → " + escapeHtml(r.destino) : ""}${r.nota ? " · " + escapeHtml(r.nota) : ""}
+        </div>
+      </div>
+      <div class="mono font-bold text-rose-700 whitespace-nowrap ml-2">
+        − ${fmtMoeda(r.monto, r.moeda)}
+      </div>
+      <button class="retiro-del text-gray-400 hover:text-red-600 ml-2 text-lg" data-id="${r.id}" title="Eliminar">🗑</button>
+    </div>
+  `).join("");
+
+  // Wire delete
+  cont.querySelectorAll(".retiro-del").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("¿Eliminar este retiro?")) return;
+      const { error } = await sb.from("caja_retiro").delete().eq("id", btn.dataset.id);
+      if (error) { toast("Error: " + error.message); return; }
+      toast("Retiro eliminado");
+      reload();
+    });
+  });
+}
+
+function canalLabel(c) {
+  return { Efectivo: "Efectivo R$", Punto: "Punto Bs", PuntoBr: "Punto Br R$", USD: "USD", BCU: "BCU" }[c] || c;
+}
+function canalIcon(c) {
+  return { Efectivo: "💵", Punto: "📲", PuntoBr: "💳", USD: "💵", BCU: "🏦" }[c] || "💰";
+}
+
+// ------------- Modal helpers -------------
+function openModal(id) { $(id).classList.remove("hidden"); }
+function closeModal(id) { $(id).classList.add("hidden"); }
+
+function wireModalClose() {
+  document.querySelectorAll(".close-modal").forEach(btn => {
+    btn.addEventListener("click", () => closeModal(btn.dataset.modal));
+  });
+  // click fuera del contenido cierra
+  ["modalCierreCaja", "modalRetiro"].forEach(id => {
+    $(id).addEventListener("click", (e) => {
+      if (e.target.id === id) closeModal(id);
+    });
+  });
+}
+
+// ------------- Cierre de caja (nuevo / edit) -------------
+async function openCierreCajaModal() {
+  const today = todayISO();
+  $("cc_fecha").value = today;
+
+  // Traer el último cierre para autocompletar "anterior" y poner en 0 los "hoy"
+  const last = await fetchUltimoSaldo(today);
+  if (last) {
+    $("cc_efectivo_ant").value = last.efectivo_saldo_total || 0;
+    $("cc_punto_ant").value = last.punto_saldo_total || 0;
+    $("cc_puntobr_ant").value = last.punto_br_saldo_total || 0;
+    $("cc_usd_ant").value = last.usd_saldo_total || 0;
+    $("cc_bcu").value = last.bcu_saldo || 0;
+  } else {
+    ["cc_efectivo_ant","cc_punto_ant","cc_puntobr_ant","cc_usd_ant","cc_bcu"].forEach(id => $(id).value = 0);
+  }
+  ["cc_efectivo_hoy","cc_gastos_efectivo","cc_punto_hoy","cc_puntobr_hoy","cc_usd_hoy","cc_recarga"].forEach(id => $(id).value = 0);
+  $("cc_notas").value = "";
+
+  recalcCC();
+  openModal("modalCierreCaja");
+}
+
+function recalcCC() {
+  const efAnt = Number($("cc_efectivo_ant").value) || 0;
+  const efHoy = Number($("cc_efectivo_hoy").value) || 0;
+  const gas = Number($("cc_gastos_efectivo").value) || 0;
+  $("cc_efectivo_total").textContent = fmtR(efAnt + efHoy - gas);
+
+  const pAnt = Number($("cc_punto_ant").value) || 0;
+  const pHoy = Number($("cc_punto_hoy").value) || 0;
+  $("cc_punto_total").textContent = fmtB(pAnt + pHoy);
+
+  const pbAnt = Number($("cc_puntobr_ant").value) || 0;
+  const pbHoy = Number($("cc_puntobr_hoy").value) || 0;
+  $("cc_puntobr_total").textContent = fmtR(pbAnt + pbHoy);
+
+  const uAnt = Number($("cc_usd_ant").value) || 0;
+  const uHoy = Number($("cc_usd_hoy").value) || 0;
+  $("cc_usd_total").textContent = fmtU(uAnt + uHoy);
+}
+
+async function guardarCierreCaja() {
+  const payload = {
+    fecha: $("cc_fecha").value,
+    efectivo_saldo_ant: Number($("cc_efectivo_ant").value) || 0,
+    efectivo_hoy: Number($("cc_efectivo_hoy").value) || 0,
+    gastos_efectivo_hoy: Number($("cc_gastos_efectivo").value) || 0,
+    punto_saldo_ant: Number($("cc_punto_ant").value) || 0,
+    punto_hoy: Number($("cc_punto_hoy").value) || 0,
+    punto_br_saldo_ant: Number($("cc_puntobr_ant").value) || 0,
+    punto_br_hoy: Number($("cc_puntobr_hoy").value) || 0,
+    usd_saldo_ant: Number($("cc_usd_ant").value) || 0,
+    usd_hoy: Number($("cc_usd_hoy").value) || 0,
+    bcu_saldo: Number($("cc_bcu").value) || 0,
+    transf_recarga: Number($("cc_recarga").value) || 0,
+    notas: $("cc_notas").value || null,
+    cajera: "Polley",
+    updated_at: new Date().toISOString(),
+  };
+  if (!payload.fecha) { toast("Poné una fecha"); return; }
+
+  const { error } = await sb.from("caja_saldo").upsert(payload, { onConflict: "fecha" });
+  if (error) { toast("Error: " + error.message, 4000); return; }
+
+  toast("Cierre de caja guardado");
+  closeModal("modalCierreCaja");
+  reload();
+}
+
+// ------------- Retiro -------------
+async function openRetiroModal() {
+  $("rt_fecha").value = todayISO();
+  $("rt_monto").value = "";
+  $("rt_destino").value = "";
+  $("rt_nota").value = "";
+  $("rt_canal").value = "Efectivo|R$";
+  $("rt_motivo").value = "Pago proveedor";
+  openModal("modalRetiro");
+}
+
+async function guardarRetiro() {
+  const [canal, moeda] = $("rt_canal").value.split("|");
+  const monto = Number($("rt_monto").value);
+  if (!monto || monto <= 0) { toast("Monto inválido"); return; }
+  const fecha = $("rt_fecha").value;
+
+  // Buscar caja_saldo_id del día (si existe) para vincular
+  let caja_saldo_id = null;
+  const { data: found } = await sb.from("caja_saldo").select("id").eq("fecha", fecha).limit(1);
+  if (found && found[0]) caja_saldo_id = found[0].id;
+
+  const payload = {
+    fecha,
+    caja_saldo_id,
+    canal,
+    moeda,
+    monto,
+    motivo: $("rt_motivo").value,
+    destino: $("rt_destino").value || null,
+    nota: $("rt_nota").value || null,
+  };
+
+  const { error } = await sb.from("caja_retiro").insert(payload);
+  if (error) { toast("Error: " + error.message, 4000); return; }
+
+  toast("Retiro registrado");
+  closeModal("modalRetiro");
+  reload();
+}
+
+// ------------- Wire caja listeners (se llama desde init) -------------
+function wireCajaListeners() {
+  wireModalClose();
+  $("nuevoCierreCajaBtn").addEventListener("click", openCierreCajaModal);
+  $("nuevoRetiroBtn").addEventListener("click", openRetiroModal);
+  $("cc_guardar").addEventListener("click", guardarCierreCaja);
+  $("rt_guardar").addEventListener("click", guardarRetiro);
+  // Recalc en vivo
+  ["cc_efectivo_ant","cc_efectivo_hoy","cc_gastos_efectivo",
+   "cc_punto_ant","cc_punto_hoy",
+   "cc_puntobr_ant","cc_puntobr_hoy",
+   "cc_usd_ant","cc_usd_hoy"].forEach(id => {
+    $(id).addEventListener("input", recalcCC);
   });
 }
 

@@ -176,6 +176,79 @@
     </div>
   </div>
 
+  <!-- ===================== -->
+  <!-- 💰 SALDOS DE CAJA     -->
+  <!-- ===================== -->
+  <div class="bg-white rounded-xl p-3 card">
+    <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+      <div>
+        <h2 class="text-base font-bold text-amber-800">💰 Saldos de caja</h2>
+        <p class="text-xs text-gray-500" id="cajaFechaLabel">Cargando...</p>
+      </div>
+      <div class="flex gap-1 flex-wrap">
+        <button id="nuevoCierreCajaBtn" class="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-semibold hover:bg-amber-700">
+          + Cierre de caja
+        </button>
+        <button id="nuevoRetiroBtn" class="px-3 py-1.5 bg-rose-600 text-white rounded-lg text-xs font-semibold hover:bg-rose-700">
+          💸 Retiro
+        </button>
+      </div>
+    </div>
+
+    <!-- Cards por canal -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
+      <!-- Efectivo R$ -->
+      <div class="kpi border-green-400">
+        <div class="kpi-label">💵 Efectivo R$</div>
+        <div class="kpi-value mono text-green-700" id="cajaEfectivo">R$ 0,00</div>
+        <div class="text-[10px] text-gray-500 mt-1" id="cajaEfectivoDetail"></div>
+      </div>
+      <!-- Punto Bs -->
+      <div class="kpi border-blue-400">
+        <div class="kpi-label">📲 Punto (Bs)</div>
+        <div class="kpi-value mono text-blue-700" id="cajaPunto">Bs 0,00</div>
+        <div class="text-[10px] text-gray-500 mt-1" id="cajaPuntoDetail"></div>
+      </div>
+      <!-- Punto Br R$ -->
+      <div class="kpi border-amber-400">
+        <div class="kpi-label">💳 Punto Br (R$)</div>
+        <div class="kpi-value mono text-amber-700" id="cajaPuntoBr">R$ 0,00</div>
+        <div class="text-[10px] text-gray-500 mt-1" id="cajaPuntoBrDetail"></div>
+      </div>
+      <!-- USD -->
+      <div class="kpi border-emerald-500">
+        <div class="kpi-label">💵 USD</div>
+        <div class="kpi-value mono text-emerald-700" id="cajaUsd">US$ 0</div>
+        <div class="text-[10px] text-gray-500 mt-1" id="cajaUsdDetail"></div>
+      </div>
+      <!-- BCU -->
+      <div class="kpi border-indigo-400">
+        <div class="kpi-label">🏦 BCU (BNC)</div>
+        <div class="kpi-value mono text-indigo-700" id="cajaBcu">R$ 0,00</div>
+        <div class="text-[10px] text-gray-500 mt-1">Cuenta bancaria</div>
+      </div>
+    </div>
+
+    <!-- Total general -->
+    <div class="mt-3 p-3 bg-gradient-to-r from-amber-100 to-orange-100 rounded-lg border-2 border-amber-300">
+      <div class="flex justify-between items-center flex-wrap gap-2 text-sm">
+        <div>
+          <span class="font-bold text-amber-900">🧮 Total en caja física (efectivo R$):</span>
+          <span class="mono font-bold text-xl text-amber-900 ml-2" id="cajaTotalEfectivo">R$ 0,00</span>
+        </div>
+        <div class="text-xs text-gray-600">
+          📱 Recargas hoy: <span class="mono font-semibold" id="cajaRecargas">0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Retiros del día -->
+    <div class="mt-3" id="cajaRetirosSection">
+      <h3 class="text-sm font-bold text-gray-700 mb-1">📋 Retiros del período</h3>
+      <div id="cajaRetirosList" class="space-y-1"></div>
+    </div>
+  </div>
+
   <!-- Gráfico de evolución -->
   <div class="bg-white rounded-xl p-3 card">
     <div class="flex items-center justify-between mb-2">
@@ -243,6 +316,179 @@
   </div>
 
 </main>
+</div>
+
+<!-- ================================== -->
+<!-- Modal: Nuevo cierre de caja         -->
+<!-- ================================== -->
+<div id="modalCierreCaja" class="hidden fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-3">
+  <div class="bg-white rounded-2xl p-4 max-w-lg w-full max-h-[95vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-bold text-amber-800">💰 Cierre de caja</h2>
+      <button class="close-modal text-2xl text-gray-400 hover:text-gray-700" data-modal="modalCierreCaja">&times;</button>
+    </div>
+    <p class="text-xs text-gray-500 mb-3">Cargá los saldos del día como los anotás en el libro. Los "anterior" se autocompletan del último cierre guardado.</p>
+
+    <div class="space-y-3">
+      <div>
+        <label class="text-xs font-semibold text-gray-700">📅 Fecha</label>
+        <input type="date" id="cc_fecha" class="w-full p-2 border-2 border-gray-300 rounded-lg font-semibold"/>
+      </div>
+
+      <!-- Efectivo -->
+      <div class="bg-green-50 border-2 border-green-200 rounded-lg p-2">
+        <div class="text-xs font-bold text-green-800 mb-2">💵 Efectivo R$ (caja física)</div>
+        <div class="grid grid-cols-3 gap-2">
+          <div>
+            <label class="text-[10px] text-gray-600">Saldo ant.</label>
+            <input type="number" step="0.01" id="cc_efectivo_ant" class="w-full p-2 border border-gray-300 rounded text-right mono" value="0"/>
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-600">Hoy (entró)</label>
+            <input type="number" step="0.01" id="cc_efectivo_hoy" class="w-full p-2 border border-gray-300 rounded text-right mono" value="0"/>
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-600">Gastos hoy</label>
+            <input type="number" step="0.01" id="cc_gastos_efectivo" class="w-full p-2 border border-gray-300 rounded text-right mono" value="0"/>
+          </div>
+        </div>
+        <div class="text-xs text-right mt-1">Saldo total: <span class="mono font-bold text-green-800" id="cc_efectivo_total">R$ 0,00</span></div>
+      </div>
+
+      <!-- Punto Bs -->
+      <div class="bg-blue-50 border-2 border-blue-200 rounded-lg p-2">
+        <div class="text-xs font-bold text-blue-800 mb-2">📲 Punto — Pago Móvil (Bs)</div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="text-[10px] text-gray-600">Saldo ant.</label>
+            <input type="number" step="0.01" id="cc_punto_ant" class="w-full p-2 border border-gray-300 rounded text-right mono" value="0"/>
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-600">Hoy</label>
+            <input type="number" step="0.01" id="cc_punto_hoy" class="w-full p-2 border border-gray-300 rounded text-right mono" value="0"/>
+          </div>
+        </div>
+        <div class="text-xs text-right mt-1">Saldo total: <span class="mono font-bold text-blue-800" id="cc_punto_total">Bs 0,00</span></div>
+      </div>
+
+      <!-- Punto Br R$ -->
+      <div class="bg-amber-50 border-2 border-amber-200 rounded-lg p-2">
+        <div class="text-xs font-bold text-amber-800 mb-2">💳 Punto Br — POS Brasil (R$)</div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="text-[10px] text-gray-600">Saldo ant.</label>
+            <input type="number" step="0.01" id="cc_puntobr_ant" class="w-full p-2 border border-gray-300 rounded text-right mono" value="0"/>
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-600">Hoy</label>
+            <input type="number" step="0.01" id="cc_puntobr_hoy" class="w-full p-2 border border-gray-300 rounded text-right mono" value="0"/>
+          </div>
+        </div>
+        <div class="text-xs text-right mt-1">Saldo total: <span class="mono font-bold text-amber-800" id="cc_puntobr_total">R$ 0,00</span></div>
+      </div>
+
+      <!-- USD -->
+      <div class="bg-emerald-50 border-2 border-emerald-200 rounded-lg p-2">
+        <div class="text-xs font-bold text-emerald-800 mb-2">💵 USD</div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="text-[10px] text-gray-600">Saldo ant.</label>
+            <input type="number" step="0.01" id="cc_usd_ant" class="w-full p-2 border border-gray-300 rounded text-right mono" value="0"/>
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-600">Hoy</label>
+            <input type="number" step="0.01" id="cc_usd_hoy" class="w-full p-2 border border-gray-300 rounded text-right mono" value="0"/>
+          </div>
+        </div>
+        <div class="text-xs text-right mt-1">Saldo total: <span class="mono font-bold text-emerald-800" id="cc_usd_total">US$ 0</span></div>
+      </div>
+
+      <!-- BCU + recarga + notas -->
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-xs text-gray-700">🏦 B.C.U (BNC R$)</label>
+          <input type="number" step="0.01" id="cc_bcu" class="w-full p-2 border border-gray-300 rounded text-right mono" value="0"/>
+        </div>
+        <div>
+          <label class="text-xs text-gray-700">📱 Recargas celular</label>
+          <input type="number" step="0.01" id="cc_recarga" class="w-full p-2 border border-gray-300 rounded text-right mono" value="0"/>
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-gray-700">📝 Notas</label>
+        <textarea id="cc_notas" rows="2" class="w-full p-2 border border-gray-300 rounded text-sm"></textarea>
+      </div>
+
+      <div class="flex gap-2 pt-1">
+        <button class="close-modal flex-1 py-2 border-2 border-gray-300 rounded-lg font-semibold" data-modal="modalCierreCaja">Cancelar</button>
+        <button id="cc_guardar" class="flex-1 py-2 bg-amber-600 text-white rounded-lg font-bold">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================================== -->
+<!-- Modal: Nuevo retiro                 -->
+<!-- ================================== -->
+<div id="modalRetiro" class="hidden fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-3">
+  <div class="bg-white rounded-2xl p-4 max-w-md w-full max-h-[95vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-bold text-rose-700">💸 Retiro / salida de caja</h2>
+      <button class="close-modal text-2xl text-gray-400 hover:text-gray-700" data-modal="modalRetiro">&times;</button>
+    </div>
+    <p class="text-xs text-gray-500 mb-3">Registrá pagos a proveedores, transferencias al banco, retiros propios, etc. Se descuenta del canal elegido.</p>
+
+    <div class="space-y-3">
+      <div>
+        <label class="text-xs font-semibold text-gray-700">📅 Fecha</label>
+        <input type="date" id="rt_fecha" class="w-full p-2 border-2 border-gray-300 rounded-lg"/>
+      </div>
+
+      <div>
+        <label class="text-xs font-semibold text-gray-700">💳 De qué canal sale</label>
+        <select id="rt_canal" class="w-full p-2 border-2 border-gray-300 rounded-lg font-semibold">
+          <option value="Efectivo|R$">💵 Efectivo R$ (caja física)</option>
+          <option value="Punto|Bs">📲 Punto — Pago Móvil (Bs)</option>
+          <option value="PuntoBr|R$">💳 Punto Br — POS Brasil (R$)</option>
+          <option value="USD|USD">💵 USD</option>
+          <option value="BCU|R$">🏦 B.C.U (BNC R$)</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="text-xs font-semibold text-gray-700">💰 Monto</label>
+        <input type="number" step="0.01" id="rt_monto" class="w-full p-3 border-2 border-rose-300 rounded-lg text-right mono text-xl font-bold" placeholder="0.00"/>
+      </div>
+
+      <div>
+        <label class="text-xs font-semibold text-gray-700">🎯 Motivo</label>
+        <select id="rt_motivo" class="w-full p-2 border-2 border-gray-300 rounded-lg">
+          <option>Pago proveedor</option>
+          <option>Transferencia al banco (BNC)</option>
+          <option>Retiro propio</option>
+          <option>Pago empleado</option>
+          <option>Compra insumos</option>
+          <option>Cambio de moneda</option>
+          <option>Otro</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="text-xs font-semibold text-gray-700">📍 Destino (opcional)</label>
+        <input type="text" id="rt_destino" class="w-full p-2 border-2 border-gray-300 rounded-lg" placeholder="Ej: Proveedor X, BNC, Yo mismo..."/>
+      </div>
+
+      <div>
+        <label class="text-xs font-semibold text-gray-700">📝 Nota (opcional)</label>
+        <textarea id="rt_nota" rows="2" class="w-full p-2 border-2 border-gray-300 rounded-lg text-sm" placeholder="Detalle adicional..."></textarea>
+      </div>
+
+      <div class="flex gap-2 pt-1">
+        <button class="close-modal flex-1 py-2 border-2 border-gray-300 rounded-lg font-semibold" data-modal="modalRetiro">Cancelar</button>
+        <button id="rt_guardar" class="flex-1 py-2 bg-rose-600 text-white rounded-lg font-bold">Registrar retiro</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Toast -->
