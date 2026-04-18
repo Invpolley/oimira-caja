@@ -455,7 +455,7 @@ function escapeHtml(s) {
 // ============================================================
 // Controllers
 // ============================================================
-async function reload() {
+async function reload({ preserveExpanded = true } = {}) {
   $("loadingState").classList.remove("hidden");
   $("diasList").innerHTML = "";
   $("emptyState").classList.add("hidden");
@@ -468,9 +468,11 @@ async function reload() {
     state.cierres = cierres;
     state.cajaSaldos = cajaSaldos;
     state.cajaRetiros = cajaRetiros;
-    state.expanded.clear();
-    state.allExpanded = false;
-    $("toggleAllBtn").textContent = "Expandir todo";
+    if (!preserveExpanded) {
+      state.expanded.clear();
+      state.allExpanded = false;
+      $("toggleAllBtn").textContent = "Expandir todo";
+    }
     renderKPIs();
     renderChart();
     renderDias();
@@ -479,9 +481,19 @@ async function reload() {
     renderCajaSaldos();
     renderCajaRetiros();
     renderCajaEvolucion();
+    updateLastRefreshLabel();
   } catch (e) {
     console.error(e);
   }
+}
+
+function updateLastRefreshLabel() {
+  const el = $("lastRefreshLabel");
+  if (!el) return;
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  el.textContent = "Actualizado " + hh + ":" + mm;
 }
 
 function setRango(desde, hasta) {
@@ -489,7 +501,8 @@ function setRango(desde, hasta) {
   state.rango.hasta = hasta;
   $("fechaDesde").value = desde;
   $("fechaHasta").value = hasta;
-  reload();
+  // Cambio de rango: tiene sentido colapsar los detalles (son otros días)
+  reload({ preserveExpanded: false });
 }
 
 // ============================================================
@@ -553,10 +566,8 @@ function init() {
   window.addEventListener("online", () => setStatus("online", "Conectado"));
   window.addEventListener("offline", () => setStatus("offline", "Sin conexión"));
 
-  // Refresco automático cada 60s
-  setInterval(() => {
-    if (!document.hidden) reload();
-  }, 60000);
+  // El refresco automático fue desactivado — solo al iniciar o con el botón 🔄
+  // Así no se colapsan los detalles si estás leyendo o haciendo scroll.
 
   // Wire del módulo de caja (modales, retiros, etc)
   wireCajaListeners();
