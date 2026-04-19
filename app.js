@@ -116,6 +116,8 @@ function renderIngresos() {
 
   // Listeners
   list.querySelectorAll('input[data-field="monto"]').forEach(inp => {
+    // Autoseleccionar contenido al enfocar (fix del "0" que no se reemplaza)
+    inp.addEventListener("focus", (e) => e.target.select());
     inp.addEventListener("input", (e) => {
       const i = parseInt(e.target.dataset.idx);
       state.ingresos[i].monto = parseFloat(e.target.value) || 0;
@@ -154,6 +156,7 @@ function renderGastos() {
         <select data-idx="${idx}" data-field="moeda">
           <option value="R$" ${g.moeda === 'R$' ? 'selected' : ''}>R$</option>
           <option value="Bs" ${g.moeda === 'Bs' ? 'selected' : ''}>Bs</option>
+          <option value="USD" ${g.moeda === 'USD' ? 'selected' : ''}>US$</option>
         </select>
         <select data-idx="${idx}" data-field="categoria">
           ${catOptions}
@@ -164,6 +167,9 @@ function renderGastos() {
   });
 
   list.querySelectorAll('[data-field]').forEach(el => {
+    if (el.tagName === "INPUT" && el.type === "number") {
+      el.addEventListener("focus", (e) => e.target.select());
+    }
     el.addEventListener("input", (e) => updateGastoField(e));
     el.addEventListener("change", (e) => updateGastoField(e));
   });
@@ -190,15 +196,49 @@ function updateGastoField(e) {
 function updateTotals() {
   const sumRsIng = state.ingresos.filter(i => i.moeda === "R$").reduce((s, i) => s + (i.monto || 0), 0);
   const sumBsIng = state.ingresos.filter(i => i.moeda === "Bs").reduce((s, i) => s + (i.monto || 0), 0);
+  const sumUsdIng = state.ingresos.filter(i => i.moeda === "USD").reduce((s, i) => s + (i.monto || 0), 0);
   const sumRsGas = state.gastos.filter(g => g.moeda === "R$").reduce((s, g) => s + (g.monto || 0), 0);
   const sumBsGas = state.gastos.filter(g => g.moeda === "Bs").reduce((s, g) => s + (g.monto || 0), 0);
+  const sumUsdGas = state.gastos.filter(g => g.moeda === "USD").reduce((s, g) => s + (g.monto || 0), 0);
 
+  const netoRs = sumRsIng - sumRsGas;
+  const netoBs = sumBsIng - sumBsGas;
+  const netoUsd = sumUsdIng - sumUsdGas;
+
+  // Card principal destacada (resumen en vivo)
+  setTxt("resVentaRs", fmt("R$", sumRsIng));
+  setTxt("resVentaBs", fmt("Bs", sumBsIng));
+  setTxt("resVentaUsd", fmt("US$", sumUsdIng));
+  setTxt("resGastoRs", fmt("R$", sumRsGas));
+  setTxt("resGastoBs", fmt("Bs", sumBsGas));
+  setTxt("resGastoUsd", fmt("US$", sumUsdGas));
+  setTxt("resNetoRs", fmt("R$", netoRs));
+  setTxt("resNetoBs", fmt("Bs", netoBs));
+  setTxt("resNetoUsd", fmt("US$", netoUsd));
+  colorNeto("resNetoRs", netoRs);
+  colorNeto("resNetoBs", netoBs);
+  colorNeto("resNetoUsd", netoUsd);
+  // Banner rojo si algún neto es negativo
+  const banner = document.getElementById("negativoBanner");
+  if (banner) {
+    banner.classList.toggle("hidden", !(netoRs < 0 || netoBs < 0 || netoUsd < 0));
+  }
+
+  // Card de totales detallada (la que ya existía)
   document.getElementById("totRsIng").textContent = fmt("R$", sumRsIng);
   document.getElementById("totBsIng").textContent = fmt("Bs", sumBsIng);
   document.getElementById("totRsGas").textContent = "-" + fmt("R$", sumRsGas);
   document.getElementById("totBsGas").textContent = "-" + fmt("Bs", sumBsGas);
-  document.getElementById("netoRs").textContent = fmt("R$", sumRsIng - sumRsGas);
-  document.getElementById("netoBs").textContent = fmt("Bs", sumBsIng - sumBsGas);
+  document.getElementById("netoRs").textContent = fmt("R$", netoRs);
+  document.getElementById("netoBs").textContent = fmt("Bs", netoBs);
+}
+
+function setTxt(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
+function colorNeto(id, val) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove("text-green-700","text-red-700","text-gray-700");
+  el.classList.add(val > 0 ? "text-green-700" : val < 0 ? "text-red-700" : "text-gray-700");
 }
 
 function fmt(moeda, n) {
@@ -261,7 +301,8 @@ async function loadExistingCierre() {
   state.ingresos = ingresosCatalog.map(fp => {
     const fieldMap = {
       'PIX': 'pix_rs', 'Dinheiro': 'dinheiro_rs', 'Débito POS': 'debito_rs',
-      'Pago Móvil': 'pago_movil_bs', 'Bs efectivo': 'bs_efectivo_bs'
+      'Pago Móvil': 'pago_movil_bs', 'Bs efectivo': 'bs_efectivo_bs',
+      'USD': 'usd_usd'
     };
     const field = fieldMap[fp.nombre];
     return {
@@ -341,11 +382,15 @@ function bindStatic() {
     saveDraft();
   });
 
-  // Sacos / Tickets
-  document.getElementById("sacosTrigo").addEventListener("input", e => {
+  // Sacos / Tickets (con autoselect al tocar)
+  const sacos = document.getElementById("sacosTrigo");
+  sacos.addEventListener("focus", e => e.target.select());
+  sacos.addEventListener("input", e => {
     state.sacosTrigo = parseInt(e.target.value) || 0; saveDraft();
   });
-  document.getElementById("tickets").addEventListener("input", e => {
+  const tickets = document.getElementById("tickets");
+  tickets.addEventListener("focus", e => e.target.select());
+  tickets.addEventListener("input", e => {
     state.tickets = parseInt(e.target.value) || 0; saveDraft();
   });
 
@@ -590,6 +635,7 @@ async function enviarCierre(transmitir = true) {
       debito_rs: getPreset('Débito POS'),
       pago_movil_bs: getPreset('Pago Móvil'),
       bs_efectivo_bs: getPreset('Bs efectivo'),
+      usd_usd: getPreset('USD'),
       sacos_trigo: state.sacosTrigo,
       tickets: state.tickets,
       observacoes: state.observacoes,

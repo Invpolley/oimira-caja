@@ -116,27 +116,23 @@ async function fetchCierres(desde, hasta) {
 // Cálculos por cierre
 // ============================================================
 function calcCierre(c) {
-  const extraR = (c.forma_pago_extra || [])
-    .filter(fp => fp.moeda === "R$")
-    .reduce((s, fp) => s + Number(fp.monto || 0), 0);
-  const extraB = (c.forma_pago_extra || [])
-    .filter(fp => fp.moeda === "Bs")
-    .reduce((s, fp) => s + Number(fp.monto || 0), 0);
-  const gastoR = (c.dia_gasto || [])
-    .filter(g => g.moeda === "R$")
-    .reduce((s, g) => s + Number(g.monto || 0), 0);
-  const gastoB = (c.dia_gasto || [])
-    .filter(g => g.moeda === "Bs")
-    .reduce((s, g) => s + Number(g.monto || 0), 0);
+  const extraR = (c.forma_pago_extra || []).filter(fp => fp.moeda === "R$").reduce((s, fp) => s + Number(fp.monto || 0), 0);
+  const extraB = (c.forma_pago_extra || []).filter(fp => fp.moeda === "Bs").reduce((s, fp) => s + Number(fp.monto || 0), 0);
+  const extraU = (c.forma_pago_extra || []).filter(fp => fp.moeda === "USD").reduce((s, fp) => s + Number(fp.monto || 0), 0);
+  const gastoR = (c.dia_gasto || []).filter(g => g.moeda === "R$").reduce((s, g) => s + Number(g.monto || 0), 0);
+  const gastoB = (c.dia_gasto || []).filter(g => g.moeda === "Bs").reduce((s, g) => s + Number(g.monto || 0), 0);
+  const gastoU = (c.dia_gasto || []).filter(g => g.moeda === "USD").reduce((s, g) => s + Number(g.monto || 0), 0);
 
   const ingR = Number(c.pix_rs || 0) + Number(c.dinheiro_rs || 0) + Number(c.debito_rs || 0) + extraR;
   const ingB = Number(c.pago_movil_bs || 0) + Number(c.bs_efectivo_bs || 0) + extraB;
+  const ingU = Number(c.usd_usd || 0) + extraU;
 
   return {
-    ingR, ingB, gastoR, gastoB,
+    ingR, ingB, ingU, gastoR, gastoB, gastoU,
     netoR: ingR - gastoR,
     netoB: ingB - gastoB,
-    extraR, extraB,
+    netoU: ingU - gastoU,
+    extraR, extraB, extraU,
   };
 }
 
@@ -144,17 +140,16 @@ function calcCierre(c) {
 // Render KPIs
 // ============================================================
 function renderKPIs() {
-  let totR = 0, totB = 0, totGasR = 0, totGasB = 0;
+  let totR = 0, totB = 0, totU = 0, totGasR = 0, totGasB = 0, totGasU = 0;
   for (const c of state.cierres) {
     const k = calcCierre(c);
-    totR += k.ingR;
-    totB += k.ingB;
-    totGasR += k.gastoR;
-    totGasB += k.gastoB;
+    totR += k.ingR; totB += k.ingB; totU += k.ingU;
+    totGasR += k.gastoR; totGasB += k.gastoB; totGasU += k.gastoU;
   }
   $("kpiIngRs").textContent = fmtR(totR);
   $("kpiIngBs").textContent = fmtB(totB);
-  $("kpiGastos").textContent = fmtR(totGasR) + " / " + fmtB(totGasB);
+  $("kpiIngUsd").textContent = fmtU(totU);
+  $("kpiGastos").textContent = fmtR(totGasR) + " / " + fmtB(totGasB) + (totGasU > 0 ? " / " + fmtU(totGasU) : "");
   $("kpiDias").textContent = state.cierres.length;
   const d1 = state.rango.desde, d2 = state.rango.hasta;
   $("kpiDiasRango").textContent = `(${fmtFecha(d1)} → ${fmtFecha(d2)})`;
@@ -286,6 +281,7 @@ function renderDias() {
       if (Number(c.debito_rs) > 0) formasHtml.push(`<span class="pill pill-r">Débito ${fmtR(c.debito_rs)}</span>`);
       if (Number(c.pago_movil_bs) > 0) formasHtml.push(`<span class="pill pill-b">Pago Móvil ${fmtB(c.pago_movil_bs)}</span>`);
       if (Number(c.bs_efectivo_bs) > 0) formasHtml.push(`<span class="pill pill-b">Bs efectivo ${fmtB(c.bs_efectivo_bs)}</span>`);
+      if (Number(c.usd_usd) > 0) formasHtml.push(`<span class="pill" style="background:#d1fae5;color:#065f46">US$ ${fmtU(c.usd_usd)}</span>`);
       for (const fp of (c.forma_pago_extra || [])) {
         const cls = fp.moeda === "R$" ? "pill-r" : "pill-b";
         const fmt = fp.moeda === "R$" ? fmtR(fp.monto) : fmtB(fp.monto);
@@ -401,9 +397,10 @@ function exportCSV() {
     "fecha", "cajera",
     "pix_rs", "dinheiro_rs", "debito_rs", "extras_rs",
     "pago_movil_bs", "bs_efectivo_bs", "extras_bs",
-    "total_ing_rs", "total_ing_bs",
-    "gastos_rs", "gastos_bs",
-    "neto_rs", "neto_bs",
+    "usd_usd", "extras_usd",
+    "total_ing_rs", "total_ing_bs", "total_ing_usd",
+    "gastos_rs", "gastos_bs", "gastos_usd",
+    "neto_rs", "neto_bs", "neto_usd",
     "tickets", "sacos_trigo",
     "observacoes",
   ];
@@ -416,9 +413,10 @@ function exportCSV() {
       csvEsc(c.cajera || ""),
       c.pix_rs || 0, c.dinheiro_rs || 0, c.debito_rs || 0, k.extraR.toFixed(2),
       c.pago_movil_bs || 0, c.bs_efectivo_bs || 0, k.extraB.toFixed(2),
-      k.ingR.toFixed(2), k.ingB.toFixed(2),
-      k.gastoR.toFixed(2), k.gastoB.toFixed(2),
-      k.netoR.toFixed(2), k.netoB.toFixed(2),
+      c.usd_usd || 0, k.extraU.toFixed(2),
+      k.ingR.toFixed(2), k.ingB.toFixed(2), k.ingU.toFixed(2),
+      k.gastoR.toFixed(2), k.gastoB.toFixed(2), k.gastoU.toFixed(2),
+      k.netoR.toFixed(2), k.netoB.toFixed(2), k.netoU.toFixed(2),
       c.tickets || 0, c.sacos_trigo || 0,
       csvEsc(c.observacoes || ""),
     ];
@@ -806,6 +804,17 @@ if (document.readyState === "interactive" || document.readyState === "complete")
 }
 
 // ============================================================
+// 🔢 Autoselect universal en inputs numéricos (fix del "0" que no se borra)
+// ============================================================
+document.addEventListener("focusin", (e) => {
+  const el = e.target;
+  if (el.tagName === "INPUT" && (el.type === "number" || el.type === "tel") && !el.readOnly) {
+    // Seleccionar todo el contenido al enfocar (funciona bien en mobile)
+    setTimeout(() => { try { el.select(); } catch {} }, 0);
+  }
+});
+
+// ============================================================
 // ============================================================
 //   💰 MÓDULO SALDOS DE CAJA + RETIROS
 // ============================================================
@@ -856,7 +865,7 @@ function renderCajaSaldos() {
     $("cajaPunto").textContent = fmtB(0);
     $("cajaPuntoBr").textContent = fmtR(0);
     $("cajaUsd").textContent = fmtU(0);
-    $("cajaBcu").textContent = fmtR(0);
+    $("cajaBcu").textContent = fmtB(0);
     $("cajaTotalEfectivo").textContent = fmtR(0);
     $("cajaRecargas").textContent = "—";
     ["cajaEfectivoDetail","cajaPuntoDetail","cajaPuntoBrDetail","cajaUsdDetail"].forEach(id => $(id).textContent = "");
@@ -880,8 +889,8 @@ function renderCajaSaldos() {
   $("cajaUsd").textContent = fmtU(latest.usd_saldo_total);
   $("cajaUsdDetail").textContent = `ant ${fmtN(latest.usd_saldo_ant)} + hoy ${fmtN(latest.usd_hoy)}`;
 
-  // BCU
-  $("cajaBcu").textContent = fmtR(latest.bcu_saldo);
+  // BCU (Bs)
+  $("cajaBcu").textContent = fmtB(latest.bcu_saldo);
 
   // Total
   $("cajaTotalEfectivo").textContent = fmtR(latest.efectivo_saldo_total);
@@ -1154,10 +1163,10 @@ const CANALES_POR_MOEDA = {
   "R$": [
     { canal: "Efectivo", label: "Efectivo R$ (caja física)",   icon: "💵" },
     { canal: "PuntoBr",  label: "Punto Br — POS Brasil",        icon: "💳" },
-    { canal: "BCU",      label: "B.C.U — Cuenta BNC",           icon: "🏦" },
   ],
   "Bs": [
     { canal: "Punto",    label: "Punto — Pago Móvil",           icon: "📲" },
+    { canal: "BCU",      label: "B.C.U — Cuenta BNC (Bs)",       icon: "🏦" },
   ],
   "USD": [
     { canal: "USD",      label: "USD — Dólares físicos",        icon: "💵" },

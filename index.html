@@ -126,6 +126,7 @@
     -webkit-appearance: none;
     margin: 0;
   }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Mono", monospace; }
   .online-dot { background: #22c55e; }
   .offline-dot { background: #ef4444; }
   .syncing-dot { background: #eab308; animation: pulse 1s infinite; }
@@ -190,6 +191,49 @@
         <div class="font-bold text-amber-800">Modo edición activo</div>
         <div class="text-amber-700">Estás editando un cierre bloqueado. <b id="unlockedTimer">30:00</b> restantes.</div>
       </div>
+    </div>
+  </div>
+
+  <!-- Card destacada: resumen de venta / gastos / neto en vivo -->
+  <div class="bg-gradient-to-br from-amber-100 to-orange-200 rounded-xl p-3 card border-2 border-amber-400">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-base font-bold text-amber-900 flex items-center gap-2">
+        📊 Resumen del día
+      </h2>
+      <span class="text-[10px] text-amber-700 italic">se actualiza en vivo</span>
+    </div>
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-[10px] text-gray-600 uppercase">
+          <th class="text-left py-1">&nbsp;</th>
+          <th class="text-right py-1">R$</th>
+          <th class="text-right py-1">Bs</th>
+          <th class="text-right py-1">US$</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="text-green-800 font-semibold">💰 Venta</td>
+          <td class="text-right mono font-bold text-green-700" id="resVentaRs">R$ 0,00</td>
+          <td class="text-right mono font-bold text-green-700" id="resVentaBs">Bs 0,00</td>
+          <td class="text-right mono font-bold text-green-700" id="resVentaUsd">US$ 0,00</td>
+        </tr>
+        <tr>
+          <td class="text-red-800 font-semibold">💸 Gastos</td>
+          <td class="text-right mono font-semibold text-red-700" id="resGastoRs">R$ 0,00</td>
+          <td class="text-right mono font-semibold text-red-700" id="resGastoBs">Bs 0,00</td>
+          <td class="text-right mono font-semibold text-red-700" id="resGastoUsd">US$ 0,00</td>
+        </tr>
+        <tr class="border-t-2 border-amber-500">
+          <td class="text-amber-900 font-bold pt-1">📈 Neto</td>
+          <td class="text-right mono font-bold text-lg pt-1" id="resNetoRs">R$ 0,00</td>
+          <td class="text-right mono font-bold text-lg pt-1" id="resNetoBs">Bs 0,00</td>
+          <td class="text-right mono font-bold text-lg pt-1" id="resNetoUsd">US$ 0,00</td>
+        </tr>
+      </tbody>
+    </table>
+    <div id="negativoBanner" class="hidden mt-2 p-2 bg-red-100 border-2 border-red-400 rounded-lg text-center">
+      <span class="text-sm font-bold text-red-800">⚠️ El día cerró en NEGATIVO — los gastos superan la venta</span>
     </div>
   </div>
 

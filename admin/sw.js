@@ -1,5 +1,5 @@
 // Service Worker para OiMira Admin — cache + offline support
-const CACHE_NAME = "oimira-admin-v7";
+const CACHE_NAME = "oimira-admin-v8";
 const ASSETS = [
   "./",
   "./index.html",

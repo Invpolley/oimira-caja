@@ -1,5 +1,5 @@
 // Service Worker para OiMira Caja — cache + offline support
-const CACHE_NAME = "oimira-caja-v3";
+const CACHE_NAME = "oimira-caja-v4";
 const ASSETS = [
   "./",
   "./index.html",
