@@ -1082,27 +1082,64 @@ function wireModalClose() {
   });
 }
 
-// ------------- Cierre de caja (nuevo / edit) -------------
+// ------------- Cierre de caja (auto-detect nuevo vs editar) -------------
 async function openCierreCajaModal() {
   const today = todayISO();
   $("cc_fecha").value = today;
+  await cargarCierreCaja(today);
+  openModal("modalCierreCaja");
+}
 
-  // Traer el último cierre para autocompletar "anterior" y poner en 0 los "hoy"
-  const last = await fetchUltimoSaldo(today);
-  if (last) {
-    $("cc_efectivo_ant").value = last.efectivo_saldo_total || 0;
-    $("cc_punto_ant").value = last.punto_saldo_total || 0;
-    $("cc_puntobr_ant").value = last.punto_br_saldo_total || 0;
-    $("cc_usd_ant").value = last.usd_saldo_total || 0;
-    $("cc_bcu").value = last.bcu_saldo || 0;
+async function cargarCierreCaja(fecha) {
+  // 1. ¿Existe un cierre para esta fecha?
+  const { data: existing, error } = await sb
+    .from("caja_saldo")
+    .select("*")
+    .eq("fecha", fecha)
+    .maybeSingle();
+
+  if (error) { toast("Error cargando: " + error.message); return; }
+
+  const banner = $("cc_modeBanner");
+  banner.classList.remove("hidden");
+
+  if (existing) {
+    // Modo EDITAR — traer todos los valores del registro guardado
+    $("cc_efectivo_ant").value     = existing.efectivo_saldo_ant || 0;
+    $("cc_efectivo_hoy").value     = existing.efectivo_hoy || 0;
+    $("cc_gastos_efectivo").value  = existing.gastos_efectivo_hoy || 0;
+    $("cc_punto_ant").value        = existing.punto_saldo_ant || 0;
+    $("cc_punto_hoy").value        = existing.punto_hoy || 0;
+    $("cc_puntobr_ant").value      = existing.punto_br_saldo_ant || 0;
+    $("cc_puntobr_hoy").value      = existing.punto_br_hoy || 0;
+    $("cc_usd_ant").value          = existing.usd_saldo_ant || 0;
+    $("cc_usd_hoy").value          = existing.usd_hoy || 0;
+    $("cc_bcu").value              = existing.bcu_saldo || 0;
+    $("cc_recarga").value          = existing.transf_recarga || 0;
+    $("cc_notas").value            = existing.notas || "";
+
+    banner.className = "mb-3 px-3 py-2 rounded-lg text-xs font-semibold border-2 bg-amber-50 border-amber-300 text-amber-900";
+    banner.innerHTML = "✏️ <b>Editando cierre existente</b> del " + fmtFecha(fecha) + " — los cambios sobrescriben el registro guardado.";
   } else {
-    ["cc_efectivo_ant","cc_punto_ant","cc_puntobr_ant","cc_usd_ant","cc_bcu"].forEach(id => $(id).value = 0);
+    // Modo NUEVO — autocompletar saldos_ant del día anterior, resto en 0
+    const last = await fetchUltimoSaldo(fecha);
+    if (last) {
+      $("cc_efectivo_ant").value = last.efectivo_saldo_total || 0;
+      $("cc_punto_ant").value    = last.punto_saldo_total || 0;
+      $("cc_puntobr_ant").value  = last.punto_br_saldo_total || 0;
+      $("cc_usd_ant").value      = last.usd_saldo_total || 0;
+      $("cc_bcu").value          = last.bcu_saldo || 0;
+    } else {
+      ["cc_efectivo_ant","cc_punto_ant","cc_puntobr_ant","cc_usd_ant","cc_bcu"].forEach(id => $(id).value = 0);
+    }
+    ["cc_efectivo_hoy","cc_gastos_efectivo","cc_punto_hoy","cc_puntobr_hoy","cc_usd_hoy","cc_recarga"].forEach(id => $(id).value = 0);
+    $("cc_notas").value = "";
+
+    banner.className = "mb-3 px-3 py-2 rounded-lg text-xs font-semibold border-2 bg-blue-50 border-blue-300 text-blue-900";
+    banner.innerHTML = "🆕 <b>Nuevo cierre</b> del " + fmtFecha(fecha) + " — saldos anteriores auto-completados del último cierre.";
   }
-  ["cc_efectivo_hoy","cc_gastos_efectivo","cc_punto_hoy","cc_puntobr_hoy","cc_usd_hoy","cc_recarga"].forEach(id => $(id).value = 0);
-  $("cc_notas").value = "";
 
   recalcCC();
-  openModal("modalCierreCaja");
 }
 
 function recalcCC() {
@@ -1373,6 +1410,9 @@ function wireCajaListeners() {
    "cc_usd_ant","cc_usd_hoy"].forEach(id => {
     $(id).addEventListener("input", recalcCC);
   });
+
+  // Al cambiar la fecha, recargar los datos de ese día (nuevo o editar)
+  $("cc_fecha").addEventListener("change", (e) => cargarCierreCaja(e.target.value));
 
   // Retiro: selector de moneda
   document.querySelectorAll(".rt-moeda-btn").forEach(btn => {
