@@ -64,6 +64,18 @@ const state = {
 let categorias = [];   // catálogo de categorías de gastos
 let ingresosCatalog = []; // catálogo de formas de pago
 
+// ⚠ Fallback hardcoded: si Supabase no responde o el catálogo está vacío,
+// usar estos 6 presets para que la UI nunca se quede sin inputs.
+// Sincronizado con forma_pago_catalogo en BD (ver references/schema.md).
+const INGRESOS_CATALOG_FALLBACK = [
+  { nombre: "PIX",          moeda: "R$",  preset: true, orden: 1 },
+  { nombre: "Dinheiro",     moeda: "R$",  preset: true, orden: 2 },
+  { nombre: "Débito POS",   moeda: "R$",  preset: true, orden: 3 },
+  { nombre: "Pago Móvil",   moeda: "Bs",  preset: true, orden: 4 },
+  { nombre: "Bs efectivo",  moeda: "Bs",  preset: true, orden: 5 },
+  { nombre: "USD",          moeda: "USD", preset: true, orden: 6 },
+];
+
 // ============================================================================
 // IndexedDB para persistencia offline
 // ============================================================================
@@ -313,20 +325,30 @@ function escapeHtml(s) {
 // ============================================================================
 async function loadCatalog() {
   // Categorías
-  const { data: cats, error: e1 } = await supabase
-    .from('categoria_gasto')
-    .select('*')
-    .eq('activo', true)
-    .order('orden');
-  if (!e1 && cats) categorias = cats;
+  try {
+    const { data: cats, error: e1 } = await supabase
+      .from('categoria_gasto')
+      .select('*')
+      .eq('activo', true)
+      .order('orden');
+    if (!e1 && cats && cats.length > 0) categorias = cats;
+  } catch (e) { console.warn("loadCatalog categorias error:", e); }
 
   // Formas de pago
-  const { data: fps, error: e2 } = await supabase
-    .from('forma_pago_catalogo')
-    .select('*')
-    .eq('activo', true)
-    .order('orden');
-  if (!e2 && fps) ingresosCatalog = fps;
+  try {
+    const { data: fps, error: e2 } = await supabase
+      .from('forma_pago_catalogo')
+      .select('*')
+      .eq('activo', true)
+      .order('orden');
+    if (!e2 && fps && fps.length > 0) ingresosCatalog = fps;
+  } catch (e) { console.warn("loadCatalog formas_pago error:", e); }
+
+  // ⚠ Si después del fetch ingresosCatalog sigue vacío, usar fallback hardcoded
+  if (!ingresosCatalog || ingresosCatalog.length === 0) {
+    console.warn("⚠ Supabase no devolvió formas de pago — usando fallback hardcoded");
+    ingresosCatalog = INGRESOS_CATALOG_FALLBACK.slice();
+  }
 
   // Poblar ingresos preset si no hay nada cargado
   ensureIngresosPresets();
@@ -339,11 +361,15 @@ async function loadCatalog() {
  * - Si ya tiene algunos → añade los presets que falten (mantiene los extras custom)
  */
 function ensureIngresosPresets() {
-  if (!ingresosCatalog || ingresosCatalog.length === 0) return;
+  // Si el catálogo viene vacío (fetch aún no terminó o falló), usar fallback
+  const source = (ingresosCatalog && ingresosCatalog.length > 0)
+    ? ingresosCatalog
+    : INGRESOS_CATALOG_FALLBACK;
+
   const existingPresets = new Set(
     state.ingresos.filter(i => i.preset).map(i => i.nombre)
   );
-  const missing = ingresosCatalog
+  const missing = source
     .filter(fp => fp.preset && !existingPresets.has(fp.nombre))
     .map(fp => ({
       nombre: fp.nombre, moeda: fp.moeda, monto: 0, preset: fp.preset,
@@ -871,6 +897,11 @@ function updateLastSaved(text) {
 (async () => {
   await openDB();
   updateStatus();
+
+  // Pre-poblar presets con el fallback hardcoded ANTES de todo, para que
+  // la UI muestre los 6 inputs aunque falle cualquier fetch posterior.
+  ensureIngresosPresets();
+
   bindStatic();
 
   // Intentar cargar borrador local primero
