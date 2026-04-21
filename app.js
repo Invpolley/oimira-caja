@@ -7,6 +7,19 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ============================================================================
+// Helpers de fecha LOCAL (no UTC) — crítico para usuarios en zonas tipo UTC-4
+// Sin esto, cargar datos de noche hace que la fecha del día salte al siguiente
+// porque toISOString() da UTC y ya puede estar en el día siguiente.
+// ============================================================================
+function todayLocalISO() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+// ============================================================================
 // Persistencia simple de la cajera en localStorage
 // ============================================================================
 const CAJERA_LS_KEY = "oimira_cajera";
@@ -22,7 +35,7 @@ function saveCajera(nombre) {
 // Estado del formulario
 // ============================================================================
 const state = {
-  fecha: new Date().toISOString().slice(0, 10),
+  fecha: todayLocalISO(),
   cajera: loadCajera(),
   ingresos: [],   // [{nombre, moeda, monto, preset, id?}]
   gastos: [],     // [{descripcion, monto, moeda, categoria, id?}]
@@ -342,13 +355,17 @@ function bindStatic() {
     state.transmittedAt = null;
     state.unlockUntil = 0;
     if (_unlockTimer) { clearInterval(_unlockTimer); _unlockTimer = null; }
-    await loadExistingCierre();
 
-    // Si la fecha no es hoy, bloqueado por default (aunque no haya transmisión)
-    const hoy = new Date().toISOString().slice(0, 10);
-    if (state.fecha !== hoy && !state.transmittedAt) {
-      state.transmittedAt = LOCK_MARKER_DIA_ANTERIOR;
-    }
+    // 1. Intentar cargar draft local (puede ser un día que la cajera dejó a medias)
+    const draft = await loadDraft(state.fecha);
+    if (draft) Object.assign(state, draft);
+
+    // 2. Si estamos online, chequear si ya hay cierre transmitido en la DB
+    if (navigator.onLine) await loadExistingCierre();
+
+    // NOTA: ya NO bloqueamos "días anteriores sin transmisión" — esos quedan
+    // editables como borradores legítimos (caso cajera cargando de mañana
+    // los datos de la noche anterior). Solo bloquea transmitted_at real.
     renderAll();
     applyLockState();
   });
@@ -476,7 +493,7 @@ function applyLockState() {
   const lockedBanner = document.getElementById("lockedBanner");
   lockedBanner.classList.toggle("hidden", !locked);
   if (locked) {
-    const esHoy = state.fecha === new Date().toISOString().slice(0, 10);
+    const esHoy = state.fecha === todayLocalISO();
     const esMarkerDiaAnterior = state.transmittedAt === LOCK_MARKER_DIA_ANTERIOR;
 
     if (esMarkerDiaAnterior) {
@@ -754,11 +771,9 @@ function updateLastSaved(text) {
     toast("⚠️ Sin conexión — usando datos locales");
   }
 
-  // Si la fecha inicial no es hoy, también bloqueamos
-  const hoy = new Date().toISOString().slice(0, 10);
-  if (state.fecha !== hoy && !state.transmittedAt) {
-    state.transmittedAt = LOCK_MARKER_DIA_ANTERIOR;
-  }
+  // NOTA: ya no bloqueamos "días pasados sin transmitir" automáticamente.
+  // Solo bloquea lo que realmente tiene transmitted_at != null (cierre oficial).
+  // Así la cajera puede continuar borradores del día anterior sin pedir código.
 
   renderAll();
   applyLockState();
