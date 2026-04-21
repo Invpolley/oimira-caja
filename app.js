@@ -34,6 +34,18 @@ function saveCajera(nombre) {
 // ============================================================================
 // Estado del formulario
 // ============================================================================
+// Tasas default (solo se usan si no hay tasa guardada del día; las del día son editables)
+const TASA_BS_DEFAULT  = 0.0170;
+const TASA_USD_DEFAULT = 5.10;
+
+// Label visual vs nombre interno del catálogo
+// "Dinheiro" es la key en la BD (dinheiro_rs) pero visualmente mostramos
+// "Total venta efectivo" para que quede claro que es el BRUTO antes de gastos.
+function displayIngresoName(nombre) {
+  if (nombre === "Dinheiro") return "💵 Total venta efectivo";
+  return nombre;
+}
+
 const state = {
   fecha: todayLocalISO(),
   cajera: loadCajera(),
@@ -45,6 +57,8 @@ const state = {
   cierreId: null, // UUID del cierre actual (si ya existe en DB)
   transmittedAt: null,  // si está seteado = cierre oficialmente cerrado
   unlockUntil: 0,       // ms timestamp hasta cuando el modo edición sigue activo
+  tasaBsRs:  TASA_BS_DEFAULT,   // 1 Bs = X R$ para este cierre
+  tasaUsdRs: TASA_USD_DEFAULT,  // 1 USD = X R$ para este cierre
 };
 
 let categorias = [];   // catálogo de categorías de gastos
@@ -118,7 +132,7 @@ function renderIngresos() {
     const row = document.createElement("div");
     row.className = "ingreso-row";
     row.innerHTML = `
-      <span class="label">${escapeHtml(ing.nombre)}</span>
+      <span class="label">${escapeHtml(displayIngresoName(ing.nombre))}</span>
       <span class="moeda">${ing.moeda}</span>
       <input type="number" inputmode="decimal" step="0.01" min="0"
              value="${ing.monto}" data-idx="${idx}" data-field="monto" />
@@ -237,6 +251,38 @@ function updateTotals() {
     banner.classList.toggle("hidden", !(netoRs < 0 || netoBs < 0 || netoUsd < 0));
   }
 
+  // === Gran Total Venta consolidado en R$ + Efectivo que queda ===
+  const tbs = Number(state.tasaBsRs)  || TASA_BS_DEFAULT;
+  const tusd = Number(state.tasaUsdRs) || TASA_USD_DEFAULT;
+
+  // Venta bruta efectivo = el monto que la cajera puso en "Dinheiro" (ahora "Total venta efectivo")
+  const ventaEfectivoBruta = state.ingresos
+    .filter(i => i.nombre === "Dinheiro" && i.preset)
+    .reduce((s, i) => s + (Number(i.monto) || 0), 0);
+
+  // Efectivo que queda físico = venta efectivo bruta - gastos R$
+  const efectivoQueda = ventaEfectivoBruta - sumRsGas;
+
+  // Gran total venta = todas las ventas convertidas a R$
+  const granTotalVenta = sumRsIng + (sumBsIng * tbs) + (sumUsdIng * tusd);
+
+  setTxt("granTotalVenta", fmt("R$", granTotalVenta));
+  const efqEl = document.getElementById("efectivoQueda");
+  if (efqEl) {
+    efqEl.textContent = fmt("R$", efectivoQueda);
+    efqEl.className = "text-xl mono font-black " + (efectivoQueda < 0 ? "text-red-700" : "text-amber-900");
+  }
+
+  // Preview de tasas (labels "1 Bs = X R$")
+  setTxt("tasaBsPreview", tbs.toLocaleString("pt-BR", {minimumFractionDigits: 4, maximumFractionDigits: 4}));
+  setTxt("tasaUsdPreview", tusd.toLocaleString("pt-BR", {minimumFractionDigits: 4, maximumFractionDigits: 4}));
+
+  // Warning si faltan tasas con montos
+  const hayBsSinTasa  = (sumBsIng > 0 || sumBsGas > 0) && tbs  === 0;
+  const hayUsdSinTasa = (sumUsdIng > 0 || sumUsdGas > 0) && tusd === 0;
+  const tw = document.getElementById("tasaWarning");
+  if (tw) tw.classList.toggle("hidden", !(hayBsSinTasa || hayUsdSinTasa));
+
   // Card de totales detallada (la que ya existía)
   document.getElementById("totRsIng").textContent = fmt("R$", sumRsIng);
   document.getElementById("totBsIng").textContent = fmt("Bs", sumBsIng);
@@ -309,20 +355,28 @@ async function loadExistingCierre() {
   state.tickets = data.tickets || 0;
   state.observacoes = data.observacoes || "";
   state.transmittedAt = data.transmitted_at || null;  // null = borrador, timestamp = cerrado
+  // Tasas históricas del cierre (inmutables): si no hay, usar defaults
+  state.tasaBsRs  = data.tasa_bs_rs  != null ? Number(data.tasa_bs_rs)  : TASA_BS_DEFAULT;
+  state.tasaUsdRs = data.tasa_usd_rs != null ? Number(data.tasa_usd_rs) : TASA_USD_DEFAULT;
 
   // Rellenar ingresos preset
   state.ingresos = ingresosCatalog.map(fp => {
     const fieldMap = {
-      'PIX': 'pix_rs', 'Dinheiro': 'dinheiro_rs', 'Débito POS': 'debito_rs',
+      'PIX': 'pix_rs', 'Débito POS': 'debito_rs',
       'Pago Móvil': 'pago_movil_bs', 'Bs efectivo': 'bs_efectivo_bs',
       'USD': 'usd_usd'
     };
-    const field = fieldMap[fp.nombre];
-    return {
-      nombre: fp.nombre, moeda: fp.moeda,
-      monto: field ? (data[field] || 0) : 0,
-      preset: fp.preset,
-    };
+    let monto = 0;
+    if (fp.nombre === "Dinheiro") {
+      // "Dinheiro" en UI = venta efectivo BRUTA.
+      // Lee ventas_efectivo_rs (campo nuevo); legacy fallback a dinheiro_rs si vacío/0.
+      const ve = Number(data.ventas_efectivo_rs || 0);
+      monto = ve > 0 ? ve : Number(data.dinheiro_rs || 0);
+    } else {
+      const field = fieldMap[fp.nombre];
+      monto = field ? (data[field] || 0) : 0;
+    }
+    return { nombre: fp.nombre, moeda: fp.moeda, monto, preset: fp.preset };
   });
 
   // Agregar formas de pago extra
@@ -415,6 +469,28 @@ function bindStatic() {
   document.getElementById("observacoes").addEventListener("input", e => {
     state.observacoes = e.target.value; saveDraft();
   });
+
+  // Tasas de cambio del día
+  const tasaBs = document.getElementById("tasaBsRs");
+  if (tasaBs) {
+    tasaBs.value = state.tasaBsRs;
+    tasaBs.addEventListener("focus", e => e.target.select());
+    tasaBs.addEventListener("input", e => {
+      state.tasaBsRs = parseFloat(e.target.value) || 0;
+      updateTotals();
+      saveDraft();
+    });
+  }
+  const tasaUsd = document.getElementById("tasaUsdRs");
+  if (tasaUsd) {
+    tasaUsd.value = state.tasaUsdRs;
+    tasaUsd.addEventListener("focus", e => e.target.select());
+    tasaUsd.addEventListener("input", e => {
+      state.tasaUsdRs = parseFloat(e.target.value) || 0;
+      updateTotals();
+      saveDraft();
+    });
+  }
 
   // Agregar ingreso nuevo
   document.getElementById("addIngresoBtn").addEventListener("click", () => {
@@ -601,8 +677,15 @@ function openConfirmModal() {
 
   const sumR = state.ingresos.filter(i => i.moeda === "R$").reduce((s, i) => s + (Number(i.monto) || 0), 0);
   const sumB = state.ingresos.filter(i => i.moeda === "Bs").reduce((s, i) => s + (Number(i.monto) || 0), 0);
+  const sumU = state.ingresos.filter(i => i.moeda === "USD").reduce((s, i) => s + (Number(i.monto) || 0), 0);
   const gasR = state.gastos.filter(g => g.moeda === "R$").reduce((s, g) => s + (Number(g.monto) || 0), 0);
   const gasB = state.gastos.filter(g => g.moeda === "Bs").reduce((s, g) => s + (Number(g.monto) || 0), 0);
+  const gasU = state.gastos.filter(g => g.moeda === "USD").reduce((s, g) => s + (Number(g.monto) || 0), 0);
+  // Gran total venta consolidado en R$ usando las tasas del día
+  const tbs  = Number(state.tasaBsRs)  || TASA_BS_DEFAULT;
+  const tusd = Number(state.tasaUsdRs) || TASA_USD_DEFAULT;
+  const granTotal = sumR + (sumB * tbs) + (sumU * tusd);
+  const gastosTotalRs = gasR + (gasB * tbs) + (gasU * tusd);
 
   const fmt = (v, m) => m + " " + (Number(v) || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -626,6 +709,10 @@ function renderAll() {
   document.getElementById("sacosTrigo").value = state.sacosTrigo;
   document.getElementById("tickets").value = state.tickets;
   document.getElementById("observacoes").value = state.observacoes;
+  const tb = document.getElementById("tasaBsRs");
+  const tu = document.getElementById("tasaUsdRs");
+  if (tb) tb.value = state.tasaBsRs;
+  if (tu) tu.value = state.tasaUsdRs;
   renderIngresos();
   renderGastos();
   updateTotals();
@@ -644,15 +731,27 @@ async function enviarCierre(transmitir = true) {
   try {
     // Map preset ingresos a columnas de dia_cierre
     const getPreset = (nombre) => state.ingresos.find(i => i.nombre === nombre && i.preset)?.monto || 0;
+
+    // Venta efectivo bruta (lo que la cajera cargó en "Total venta efectivo"/Dinheiro)
+    const ventasEfectivoRs = getPreset('Dinheiro');
+    // Gastos en R$ del día (para derivar el "dinheiro_rs" legacy = efectivo que queda)
+    const gastosRs = state.gastos
+      .filter(g => g.moeda === "R$")
+      .reduce((s, g) => s + (Number(g.monto) || 0), 0);
+    const dinheiroRsNeto = ventasEfectivoRs - gastosRs;
+
     const cierrePayload = {
       fecha: state.fecha,
       cajera: state.cajera,
       pix_rs: getPreset('PIX'),
-      dinheiro_rs: getPreset('Dinheiro'),
+      dinheiro_rs: dinheiroRsNeto,              // ⚠ legacy: efectivo neto que queda
+      ventas_efectivo_rs: ventasEfectivoRs,      // nuevo: venta efectivo bruta
       debito_rs: getPreset('Débito POS'),
       pago_movil_bs: getPreset('Pago Móvil'),
       bs_efectivo_bs: getPreset('Bs efectivo'),
       usd_usd: getPreset('USD'),
+      tasa_bs_rs:  Number(state.tasaBsRs)  || TASA_BS_DEFAULT,
+      tasa_usd_rs: Number(state.tasaUsdRs) || TASA_USD_DEFAULT,
       sacos_trigo: state.sacosTrigo,
       tickets: state.tickets,
       observacoes: state.observacoes,

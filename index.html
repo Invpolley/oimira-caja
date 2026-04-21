@@ -235,6 +235,49 @@
     <div id="negativoBanner" class="hidden mt-2 p-2 bg-red-100 border-2 border-red-400 rounded-lg text-center">
       <span class="text-sm font-bold text-red-800">⚠️ El día cerró en NEGATIVO — los gastos superan la venta</span>
     </div>
+
+    <!-- Gran Total Venta del negocio (R$ equiv consolidado) -->
+    <div class="mt-3 p-3 bg-gradient-to-br from-green-500 to-emerald-600 text-white rounded-lg">
+      <div class="text-[10px] uppercase opacity-85 tracking-wider font-bold">Gran total venta del día</div>
+      <div class="text-2xl font-black mono" id="granTotalVenta">R$ 0,00</div>
+      <div class="text-[10px] opacity-80 mt-0.5">Todas las ventas convertidas a R$</div>
+    </div>
+
+    <!-- Efectivo que queda físico (readonly grande) -->
+    <div class="mt-2 p-3 bg-amber-100 border-2 border-dashed border-amber-500 rounded-lg">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-[10px] uppercase font-bold text-amber-800 tracking-wider">💵 Efectivo que queda</div>
+          <div class="text-[10px] text-amber-700">Para arqueo de caja física — se calcula solo</div>
+        </div>
+        <div class="text-xl mono font-black text-amber-900" id="efectivoQueda">R$ 0,00</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tasas de cambio del día -->
+  <div class="bg-white rounded-xl p-3 card border-l-4 border-yellow-400">
+    <h2 class="text-sm font-bold text-yellow-800 mb-2 flex items-center gap-2">
+      💱 Tasas de cambio del día
+    </h2>
+    <p class="text-[11px] text-gray-600 mb-2">
+      Ingresá las tasas actuales. <b>Solo aplican a este día</b> — una vez transmitido el cierre, quedan congeladas.
+    </p>
+    <div class="grid grid-cols-2 gap-2">
+      <div class="p-2 bg-blue-50 border border-blue-300 rounded-lg">
+        <label class="text-[10px] text-blue-800 font-semibold block">📲 1 Bs = <span id="tasaBsPreview" class="text-blue-900">0,0170</span> R$</label>
+        <input type="number" id="tasaBsRs" step="0.0001" value="0.017"
+               class="w-full p-1.5 text-right mono font-semibold text-blue-900 border border-blue-300 rounded text-sm bg-white"/>
+      </div>
+      <div class="p-2 bg-emerald-50 border border-emerald-300 rounded-lg">
+        <label class="text-[10px] text-emerald-800 font-semibold block">💵 1 USD = <span id="tasaUsdPreview" class="text-emerald-900">5,1000</span> R$</label>
+        <input type="number" id="tasaUsdRs" step="0.0001" value="5.10"
+               class="w-full p-1.5 text-right mono font-semibold text-emerald-900 border border-emerald-300 rounded text-sm bg-white"/>
+      </div>
+    </div>
+    <p id="tasaWarning" class="hidden mt-2 p-1.5 bg-red-100 text-red-800 text-[11px] rounded">
+      ⚠ Hay montos en Bs o USD pero una tasa está en 0. El total no va a ser correcto.
+    </p>
   </div>
 
   <!-- Ingresos -->

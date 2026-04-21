@@ -115,6 +115,10 @@ async function fetchCierres(desde, hasta) {
 // ============================================================
 // Cálculos por cierre
 // ============================================================
+// Tasas default (solo aplican si un cierre legacy no tiene tasas guardadas)
+const TASA_BS_DEFAULT_ADMIN  = 0.017;
+const TASA_USD_DEFAULT_ADMIN = 5.10;
+
 function calcCierre(c) {
   const extraR = (c.forma_pago_extra || []).filter(fp => fp.moeda === "R$").reduce((s, fp) => s + Number(fp.monto || 0), 0);
   const extraB = (c.forma_pago_extra || []).filter(fp => fp.moeda === "Bs").reduce((s, fp) => s + Number(fp.monto || 0), 0);
@@ -123,9 +127,28 @@ function calcCierre(c) {
   const gastoB = (c.dia_gasto || []).filter(g => g.moeda === "Bs").reduce((s, g) => s + Number(g.monto || 0), 0);
   const gastoU = (c.dia_gasto || []).filter(g => g.moeda === "USD").reduce((s, g) => s + Number(g.monto || 0), 0);
 
-  const ingR = Number(c.pix_rs || 0) + Number(c.dinheiro_rs || 0) + Number(c.debito_rs || 0) + extraR;
+  // Venta efectivo R$ bruta (nueva columna).
+  // Legacy fallback: si ventas_efectivo_rs es null o 0, usar dinheiro_rs como aproximación
+  // (la app vieja guardaba el monto ingresado por la cajera en dinheiro_rs).
+  const _ve = Number(c.ventas_efectivo_rs || 0);
+  const ventaEfectivoBruta = _ve > 0 ? _ve : Number(c.dinheiro_rs || 0);
+  const isLegacyBruto = _ve === 0 && Number(c.dinheiro_rs || 0) > 0;
+
+  const ingR = Number(c.pix_rs || 0) + ventaEfectivoBruta + Number(c.debito_rs || 0) + extraR;
   const ingB = Number(c.pago_movil_bs || 0) + Number(c.bs_efectivo_bs || 0) + extraB;
   const ingU = Number(c.usd_usd || 0) + extraU;
+
+  // Tasas históricas del registro (inmutables). Legacy → defaults
+  const tasaBs  = c.tasa_bs_rs  != null ? Number(c.tasa_bs_rs)  : TASA_BS_DEFAULT_ADMIN;
+  const tasaUsd = c.tasa_usd_rs != null ? Number(c.tasa_usd_rs) : TASA_USD_DEFAULT_ADMIN;
+
+  // Gran Total Venta consolidado en R$ con las tasas de ESE día
+  const granTotalRs = ingR + (ingB * tasaBs) + (ingU * tasaUsd);
+  const gastosTotalRs = gastoR + (gastoB * tasaBs) + (gastoU * tasaUsd);
+  const netoConsolidadoRs = granTotalRs - gastosTotalRs;
+
+  // Efectivo que queda físico R$ (para arqueo)
+  const efectivoQuedaRs = ventaEfectivoBruta - gastoR;
 
   return {
     ingR, ingB, ingU, gastoR, gastoB, gastoU,
@@ -133,6 +156,14 @@ function calcCierre(c) {
     netoB: ingB - gastoB,
     netoU: ingU - gastoU,
     extraR, extraB, extraU,
+    // Nuevos con tasas históricas
+    ventaEfectivoBruta,
+    tasaBs, tasaUsd,
+    granTotalRs,
+    gastosTotalRs,
+    netoConsolidadoRs,
+    efectivoQuedaRs,
+    legacyRates: c.tasa_bs_rs == null || c.tasa_usd_rs == null,
   };
 }
 
@@ -141,10 +172,13 @@ function calcCierre(c) {
 // ============================================================
 function renderKPIs() {
   let totR = 0, totB = 0, totU = 0, totGasR = 0, totGasB = 0, totGasU = 0;
+  let totGranTotalRs = 0, totNetoConsolidadoRs = 0;
   for (const c of state.cierres) {
     const k = calcCierre(c);
     totR += k.ingR; totB += k.ingB; totU += k.ingU;
     totGasR += k.gastoR; totGasB += k.gastoB; totGasU += k.gastoU;
+    totGranTotalRs += k.granTotalRs;
+    totNetoConsolidadoRs += k.netoConsolidadoRs;
   }
   $("kpiIngRs").textContent = fmtR(totR);
   $("kpiIngBs").textContent = fmtB(totB);
@@ -153,6 +187,15 @@ function renderKPIs() {
   $("kpiDias").textContent = state.cierres.length;
   const d1 = state.rango.desde, d2 = state.rango.hasta;
   $("kpiDiasRango").textContent = `(${fmtFecha(d1)} → ${fmtFecha(d2)})`;
+
+  // Nuevos KPIs consolidados
+  const kgt = $("kpiGranTotal");
+  const kns = $("kpiNetoCons");
+  if (kgt) kgt.textContent = fmtR(totGranTotalRs);
+  if (kns) {
+    kns.textContent = fmtR(totNetoConsolidadoRs);
+    kns.className = "kpi-value mono " + (totNetoConsolidadoRs < 0 ? "text-red-700" : "text-amber-800");
+  }
 }
 
 // ============================================================
@@ -328,6 +371,29 @@ function renderDias() {
           <div class="text-gray-600">Neto del día:</div>
           <div class="mono font-bold ${k.netoR >= 0 ? "text-green-700" : "text-red-700"}">${fmtR(k.netoR)}</div>
           <div class="mono font-bold ${k.netoB >= 0 ? "text-green-700" : "text-red-700"}">${fmtB(k.netoB)}</div>
+        </div>
+        <!-- Tasas + totales consolidados del día -->
+        <div class="mt-3 p-2 bg-white border border-amber-300 rounded-lg text-xs space-y-1">
+          <div class="font-bold text-amber-800 flex items-center justify-between">
+            <span>💱 Tasas del día ${k.legacyRates ? '<span class="text-[10px] text-gray-500 italic">(default — cierre legacy)</span>' : ''}</span>
+            <span class="mono text-amber-700">1 Bs = ${k.tasaBs.toFixed(4)} R$ · 1 USD = ${k.tasaUsd.toFixed(4)} R$</span>
+          </div>
+          <div class="flex justify-between pt-1 border-t border-gray-200">
+            <span>🏆 Gran Total Venta (R$ equiv):</span>
+            <span class="mono font-bold text-green-700">${fmtR(k.granTotalRs)}</span>
+          </div>
+          <div class="flex justify-between">
+            <span>💸 Gastos total (R$ equiv):</span>
+            <span class="mono font-semibold text-red-700">−${fmtR(k.gastosTotalRs)}</span>
+          </div>
+          <div class="flex justify-between">
+            <span>💵 Efectivo que queda (físico R$):</span>
+            <span class="mono font-semibold ${k.efectivoQuedaRs < 0 ? 'text-red-700' : 'text-amber-800'}">${fmtR(k.efectivoQuedaRs)}</span>
+          </div>
+          <div class="flex justify-between pt-1 border-t border-amber-300">
+            <span class="font-bold">📈 Neto consolidado R$:</span>
+            <span class="mono font-bold text-lg ${k.netoConsolidadoRs < 0 ? 'text-red-700' : 'text-green-700'}">${fmtR(k.netoConsolidadoRs)}</span>
+          </div>
         </div>
       `;
       list.appendChild(detail);
