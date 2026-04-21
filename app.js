@@ -112,8 +112,34 @@ async function loadDraft(fecha) {
   return new Promise((resolve) => {
     const tx = db.transaction("drafts", "readonly");
     const req = tx.objectStore("drafts").get(fecha);
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const d = req.result;
+      if (!d) return resolve(null);
+      // ⚠ Validación de coherencia: si la fecha DENTRO del draft no coincide con la
+      //   clave con la que se consultó, es un draft corrupto (legado del bug timezone UTC).
+      //   Lo descartamos y borramos para evitar confusión.
+      if (d.fecha && d.fecha !== fecha) {
+        console.warn(`[loadDraft] Descartando draft corrupto: key=${fecha} pero contenido.fecha=${d.fecha}`);
+        // Borrar en background, no esperar
+        try {
+          const tx2 = db.transaction("drafts", "readwrite");
+          tx2.objectStore("drafts").delete(fecha);
+        } catch {}
+        return resolve(null);
+      }
+      resolve(d);
+    };
     req.onerror = () => resolve(null);
+  });
+}
+
+async function deleteDraft(fecha) {
+  if (!db) return;
+  return new Promise((resolve) => {
+    const tx = db.transaction("drafts", "readwrite");
+    const req = tx.objectStore("drafts").delete(fecha);
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => resolve(false);
   });
 }
 
@@ -565,6 +591,31 @@ function bindStatic() {
     saveDraft();
     toast("✅ Borrador guardado localmente");
   });
+
+  // Descartar borrador (borra de IndexedDB el draft de la fecha actual y resetea la UI)
+  const descartarBtn = document.getElementById("descartarBtn");
+  if (descartarBtn) {
+    descartarBtn.addEventListener("click", async () => {
+      if (!confirm("¿Descartar el borrador de " + state.fecha + "?\n\nSe borran solo los datos LOCALES no transmitidos. Los cierres ya cerrados en servidor no se tocan.")) return;
+      await deleteDraft(state.fecha);
+      // Resetear state de ingresos/gastos/tasas/campos
+      state.ingresos = [];
+      state.gastos = [];
+      state.sacosTrigo = 0;
+      state.tickets = 0;
+      state.observacoes = "";
+      state.cierreId = null;
+      state.transmittedAt = null;
+      state.unlockUntil = 0;
+      // Re-cargar desde DB (por si hay cierre oficial que debe verse)
+      if (navigator.onLine) await loadExistingCierre();
+      // Asegurar presets visibles con monto 0
+      ensureIngresosPresets();
+      renderAll();
+      applyLockState();
+      toast("🗑 Borrador descartado — cargado de cero");
+    });
+  }
 
   // Enviar → primero confirmar
   document.getElementById("enviarBtn").addEventListener("click", openConfirmModal);
