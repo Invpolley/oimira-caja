@@ -329,13 +329,28 @@ async function loadCatalog() {
   if (!e2 && fps) ingresosCatalog = fps;
 
   // Poblar ingresos preset si no hay nada cargado
-  if (state.ingresos.length === 0) {
-    state.ingresos = ingresosCatalog.map(fp => ({
-      nombre: fp.nombre,
-      moeda: fp.moeda,
-      monto: 0,
-      preset: fp.preset,
+  ensureIngresosPresets();
+}
+
+/**
+ * Garantiza que los ingresos preset (PIX, Dinheiro, Débito, Pago Móvil, Bs, USD)
+ * estén siempre visibles en la UI.
+ * - Si state.ingresos está vacío → pobla todos los presets con monto 0
+ * - Si ya tiene algunos → añade los presets que falten (mantiene los extras custom)
+ */
+function ensureIngresosPresets() {
+  if (!ingresosCatalog || ingresosCatalog.length === 0) return;
+  const existingPresets = new Set(
+    state.ingresos.filter(i => i.preset).map(i => i.nombre)
+  );
+  const missing = ingresosCatalog
+    .filter(fp => fp.preset && !existingPresets.has(fp.nombre))
+    .map(fp => ({
+      nombre: fp.nombre, moeda: fp.moeda, monto: 0, preset: fp.preset,
     }));
+  if (missing.length > 0) {
+    // Agregar los faltantes al principio para que aparezcan en orden
+    state.ingresos = [...missing, ...state.ingresos];
   }
 }
 
@@ -416,6 +431,10 @@ function bindStatic() {
 
     // 2. Si estamos online, chequear si ya hay cierre transmitido en la DB
     if (navigator.onLine) await loadExistingCierre();
+
+    // 3. Garantizar que los presets (PIX, Dinheiro, Débito, Pago Móvil, Bs, USD)
+    //    siempre estén visibles aunque no haya ni draft ni cierre en DB
+    ensureIngresosPresets();
 
     // NOTA: ya NO bloqueamos "días anteriores sin transmisión" — esos quedan
     // editables como borradores legítimos (caso cajera cargando de mañana
@@ -869,6 +888,10 @@ function updateLastSaved(text) {
     console.warn("Error cargando catálogo:", e);
     toast("⚠️ Sin conexión — usando datos locales");
   }
+
+  // Garantizar que los presets siempre estén visibles (PIX, Dinheiro, Débito, Pago Móvil, Bs, USD).
+  // Esto protege contra: draft incompleto, fallo de fetch del catálogo, carga de cierre legacy sin todos los campos.
+  ensureIngresosPresets();
 
   // NOTA: ya no bloqueamos "días pasados sin transmitir" automáticamente.
   // Solo bloquea lo que realmente tiene transmitted_at != null (cierre oficial).
