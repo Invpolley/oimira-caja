@@ -475,11 +475,21 @@ function bindStatic() {
     state.gastos = [];
     state.transmittedAt = null;
     state.unlockUntil = 0;
+    // Reset de tasas al default — si no, quedan pegadas las del día anterior
+    // y se guardan en tasa_bs_rs/tasa_usd_rs aunque el cierre nuevo no las haya editado.
+    state.tasaBsRs  = TASA_BS_DEFAULT;
+    state.tasaUsdRs = TASA_USD_DEFAULT;
     if (_unlockTimer) { clearInterval(_unlockTimer); _unlockTimer = null; }
 
     // 1. Intentar cargar draft local (puede ser un día que la cajera dejó a medias)
+    //    No dejamos que el draft pise state.cajera (viene de localStorage y es
+    //    la cajera del turno actual, no la que estaba activa en el draft viejo).
     const draft = await loadDraft(state.fecha);
-    if (draft) Object.assign(state, draft);
+    if (draft) {
+      const cajeraActual = state.cajera;
+      Object.assign(state, draft);
+      state.cajera = cajeraActual;
+    }
 
     // 2. Si estamos online, chequear si ya hay cierre transmitido en la DB
     if (navigator.onLine) await loadExistingCierre();
@@ -955,10 +965,14 @@ function updateLastSaved(text) {
 
   bindStatic();
 
-  // Intentar cargar borrador local primero
+  // Intentar cargar borrador local primero — pero proteger state.cajera
+  // (viene de localStorage y refleja la cajera del turno actual; el draft puede
+  // tener un nombre viejo de cuando se guardó).
   const draft = await loadDraft(state.fecha);
   if (draft) {
+    const cajeraActual = state.cajera;
     Object.assign(state, draft);
+    state.cajera = cajeraActual;
   }
 
   try {

@@ -29,12 +29,23 @@ const fmtB = (n) => "Bs " + (Number(n) || 0).toLocaleString("es-AR", { minimumFr
 const fmtU = (n) => "US$ " + (Number(n) || 0).toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const fmtN = (n) => (Number(n) || 0).toLocaleString("es-AR");
 const fmtMoeda = (n, m) => m === "Bs" ? fmtB(n) : m === "USD" ? fmtU(n) : fmtR(n);
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const daysAgo = (n) => {
+// Fecha local en formato YYYY-MM-DD (NO usar toISOString().slice porque
+// devuelve UTC y entre 20:00 y medianoche en Venezuela/Brasil ya pasa al día siguiente)
+function todayISO() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+function daysAgo(n) {
   const d = new Date();
   d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
-};
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
 
 function toast(msg, ms = 2200) {
   const t = $("toast");
@@ -351,7 +362,7 @@ function renderDias() {
               🎫 Tickets: <b>${c.tickets || 0}</b> · 🌾 Sacos: <b>${c.sacos_trigo || 0}</b>
             </div>
             <div class="text-xs text-gray-600">
-              👤 Cajera: <b>${escapeHtml(c.cajera || "—")}</b> · 📤 Enviado: ${c.submitted_at ? new Date(c.submitted_at).toLocaleString("es-AR") : "—"}
+              👤 Cajera: <b>${escapeHtml(c.cajera || "—")}</b> · 📤 Enviado: ${c.transmitted_at ? new Date(c.transmitted_at).toLocaleString("es-AR") : "—"}
             </div>
           </div>
           <div>
@@ -1250,9 +1261,52 @@ async function guardarCierreCaja() {
   const { error } = await sb.from("caja_saldo").upsert(payload, { onConflict: "fecha" });
   if (error) { toast("Error: " + error.message, 4000); return; }
 
-  toast("Cierre de caja guardado");
+  // Propagar el nuevo saldo total al saldo_ant del día siguiente (si existe).
+  // Sin esto, editar un cierre viejo deja el día siguiente con un saldo_ant huérfano.
+  const propagado = await propagarSaldoAlDiaSiguiente(payload.fecha);
+
+  toast(propagado
+    ? "Cierre guardado · saldo del día siguiente recalculado"
+    : "Cierre de caja guardado");
   closeModal("modalCierreCaja");
   reload();
+}
+
+// Recalcula el saldo_ant del cierre del día SIGUIENTE (si existe), usando
+// el saldo_total recién calculado del día que acabamos de guardar.
+// Devuelve true si propagó algo, false si no había día siguiente.
+async function propagarSaldoAlDiaSiguiente(fecha) {
+  // 1. Traer el saldo_total de HOY desde la view (ya incluye retiros)
+  const { data: hoy, error: errHoy } = await sb
+    .from("caja_saldo_resumen")
+    .select("efectivo_saldo_total, punto_saldo_total, punto_br_saldo_total, usd_saldo_total, bcu_saldo")
+    .eq("fecha", fecha)
+    .maybeSingle();
+  if (errHoy || !hoy) return false;
+
+  // 2. Buscar el cierre del día SIGUIENTE (el más cercano hacia adelante)
+  const { data: sig, error: errSig } = await sb
+    .from("caja_saldo")
+    .select("id, fecha")
+    .gt("fecha", fecha)
+    .order("fecha", { ascending: true })
+    .limit(1);
+  if (errSig || !sig || !sig.length) return false;
+
+  // 3. Actualizar saldo_ant del día siguiente
+  const update = {
+    efectivo_saldo_ant: hoy.efectivo_saldo_total || 0,
+    punto_saldo_ant:    hoy.punto_saldo_total    || 0,
+    punto_br_saldo_ant: hoy.punto_br_saldo_total || 0,
+    usd_saldo_ant:      hoy.usd_saldo_total      || 0,
+    updated_at: new Date().toISOString(),
+  };
+  const { error: errUpd } = await sb
+    .from("caja_saldo")
+    .update(update)
+    .eq("id", sig[0].id);
+  if (errUpd) { console.warn("Propagación falló:", errUpd); return false; }
+  return true;
 }
 
 // ------------- Retiro (flujo paso-a-paso) -------------
@@ -1457,8 +1511,72 @@ async function guardarRetiro() {
   const { error } = await sb.from("caja_retiro").insert(payload);
   if (error) { toast("Error: " + error.message, 4000); return; }
 
-  toast(`Retiro de ${fmtMoeda(monto, moeda)} registrado`);
+  // Si el retiro está vinculado a un cierre, propagar el saldo recalculado
+  // al día siguiente automáticamente.
+  let propagado = false;
+  if (caja_saldo_id) propagado = await propagarSaldoAlDiaSiguiente(fecha);
+
+  toast(propagado
+    ? `Retiro registrado · saldo del día siguiente recalculado`
+    : `Retiro de ${fmtMoeda(monto, moeda)} registrado`);
   closeModal("modalRetiro");
+  reload();
+}
+
+// ------------- Reconciliar cadena entera de saldos -------------
+// Pregunta una fecha de inicio y recorre TODOS los cierres a partir de ahí,
+// recalculando saldo_ant de cada uno con el saldo_total del anterior.
+async function reconciliarCadena() {
+  const desde = prompt(
+    "Reconciliar saldos a partir de qué fecha (YYYY-MM-DD)?\n\n" +
+    "Para cada día desde esta fecha, el saldo_ant se va a recalcular\n" +
+    "con el saldo_total real del día anterior (incluyendo retiros).\n\n" +
+    "Dejar vacío para cancelar.",
+    daysAgo(7)
+  );
+  if (!desde) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(desde)) { toast("Fecha inválida. Usá YYYY-MM-DD"); return; }
+
+  // Traer todos los cierres ordenados desde la fecha
+  const { data: cierres, error } = await sb
+    .from("caja_saldo")
+    .select("id, fecha")
+    .gte("fecha", desde)
+    .order("fecha", { ascending: true });
+  if (error) { toast("Error: " + error.message, 4000); return; }
+  if (!cierres || cierres.length < 2) {
+    toast("Hace falta al menos 2 cierres consecutivos para reconciliar");
+    return;
+  }
+
+  let actualizados = 0;
+  // Para cada par consecutivo, traer el saldo_total del anterior y pisar el siguiente
+  for (let i = 0; i < cierres.length - 1; i++) {
+    const prev = cierres[i];
+    const curr = cierres[i + 1];
+
+    const { data: prevResumen } = await sb
+      .from("caja_saldo_resumen")
+      .select("efectivo_saldo_total, punto_saldo_total, punto_br_saldo_total, usd_saldo_total")
+      .eq("fecha", prev.fecha)
+      .maybeSingle();
+    if (!prevResumen) continue;
+
+    const update = {
+      efectivo_saldo_ant: prevResumen.efectivo_saldo_total || 0,
+      punto_saldo_ant:    prevResumen.punto_saldo_total    || 0,
+      punto_br_saldo_ant: prevResumen.punto_br_saldo_total || 0,
+      usd_saldo_ant:      prevResumen.usd_saldo_total      || 0,
+      updated_at: new Date().toISOString(),
+    };
+    const { error: errUpd } = await sb
+      .from("caja_saldo")
+      .update(update)
+      .eq("id", curr.id);
+    if (!errUpd) actualizados++;
+  }
+
+  toast(`Reconciliación lista · ${actualizados} cierre(s) actualizado(s)`, 4000);
   reload();
 }
 
@@ -1469,6 +1587,8 @@ function wireCajaListeners() {
   $("nuevoRetiroBtn").addEventListener("click", openRetiroModal);
   $("cc_guardar").addEventListener("click", guardarCierreCaja);
   $("rt_guardar").addEventListener("click", guardarRetiro);
+  const reconBtn = document.getElementById("reconciliarSaldosBtn");
+  if (reconBtn) reconBtn.addEventListener("click", reconciliarCadena);
   // Recalc en vivo del cierre de caja
   ["cc_efectivo_ant","cc_efectivo_hoy","cc_gastos_efectivo",
    "cc_punto_ant","cc_punto_hoy",
