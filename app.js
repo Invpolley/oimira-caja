@@ -7,16 +7,16 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ============================================================================
-// Helpers de fecha LOCAL (no UTC) — crítico para usuarios en zonas tipo UTC-4
-// Sin esto, cargar datos de noche hace que la fecha del día salte al siguiente
-// porque toISOString() da UTC y ya puede estar en el día siguiente.
+// Helpers de fecha en zona Caracas/La Paz (UTC-4) — FORZADA, no depende del device
+// La cajera puede tener el celu en cualquier zona horaria y el cierre siempre
+// se guarda con la fecha real de la panadería (UTC-4).
 // ============================================================================
+const OIMIRA_TZ = "America/Caracas"; // = UTC-4, igual que La Paz, Bolivia
+const _DATE_FMT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: OIMIRA_TZ, year: "numeric", month: "2-digit", day: "2-digit"
+});
 function todayLocalISO() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return _DATE_FMT.format(new Date()); // "YYYY-MM-DD" en hora Caracas/La Paz
 }
 
 // ============================================================================

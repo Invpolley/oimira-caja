@@ -29,22 +29,18 @@ const fmtB = (n) => "Bs " + (Number(n) || 0).toLocaleString("es-AR", { minimumFr
 const fmtU = (n) => "US$ " + (Number(n) || 0).toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const fmtN = (n) => (Number(n) || 0).toLocaleString("es-AR");
 const fmtMoeda = (n, m) => m === "Bs" ? fmtB(n) : m === "USD" ? fmtU(n) : fmtR(n);
-// Fecha local en formato YYYY-MM-DD (NO usar toISOString().slice porque
-// devuelve UTC y entre 20:00 y medianoche en Venezuela/Brasil ya pasa al día siguiente)
+// Fecha en zona Caracas/La Paz (UTC-4) — FORZADA, no depende del device.
+// La cajera o vos pueden estar con el celu/PC en otra zona y los cierres
+// se siguen guardando con la fecha correcta de la panadería.
+const OIMIRA_TZ = "America/Caracas"; // = UTC-4, igual que La Paz
+const _DATE_FMT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: OIMIRA_TZ, year: "numeric", month: "2-digit", day: "2-digit"
+});
 function todayISO() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+  return _DATE_FMT.format(new Date()); // "YYYY-MM-DD" en hora Caracas
 }
 function daysAgo(n) {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+  return _DATE_FMT.format(new Date(Date.now() - n * 86400000));
 }
 
 function toast(msg, ms = 2200) {
