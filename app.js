@@ -1153,6 +1153,64 @@ function updateLastSaved(text) {
   applyLockState();
 })();
 
+// ============================================================================
+// Instalación PWA — el botón aparece SOLO si la app NO está instalada
+// ============================================================================
+let deferredInstallPrompt = null;
+function isStandalone() {
+  return window.matchMedia("(display-mode: standalone)").matches
+      || window.navigator.standalone === true; // iOS Safari
+}
+function detectPlatformInstall() {
+  const ua = navigator.userAgent;
+  if (/iPad|iPhone|iPod/.test(ua)) return "ios";
+  if (/Android/.test(ua)) return "android";
+  return "desktop";
+}
+function refreshInstallBanner() {
+  const banner = document.getElementById("installBanner");
+  if (!banner) return;
+  const plat = detectPlatformInstall();
+  const puedeInstalar = !isStandalone() && (!!deferredInstallPrompt || plat === "ios");
+  banner.classList.toggle("hidden", !puedeInstalar);
+}
+function openInstallModal() {
+  const plat = detectPlatformInstall();
+  ["installIos", "installAndroid", "installDesktop"].forEach(id => {
+    document.getElementById(id)?.classList.add("hidden");
+  });
+  const showId = plat === "ios" ? "installIos" : plat === "android" ? "installAndroid" : "installDesktop";
+  document.getElementById(showId)?.classList.remove("hidden");
+  const nowBtn = document.getElementById("installNowBtn");
+  if (nowBtn) nowBtn.classList.toggle("hidden", !(deferredInstallPrompt && plat !== "ios"));
+  toggleModal("modalInstall", true);
+}
+async function triggerNativeInstall() {
+  if (!deferredInstallPrompt) { toast("El navegador no ofreció instalación todavía"); return; }
+  deferredInstallPrompt.prompt();
+  const { outcome } = await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt = null;
+  toggleModal("modalInstall", false);
+  if (outcome === "accepted") toast("✅ App instalada");
+  refreshInstallBanner();
+}
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  refreshInstallBanner();
+});
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  refreshInstallBanner();
+  toast("🎉 App instalada en tu celular");
+});
+(function wireInstall() {
+  document.getElementById("installBanner")?.addEventListener("click", openInstallModal);
+  document.getElementById("installNowBtn")?.addEventListener("click", triggerNativeInstall);
+  document.getElementById("installCloseBtn")?.addEventListener("click", () => toggleModal("modalInstall", false));
+  refreshInstallBanner();
+})();
+
 // Registrar Service Worker
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").catch(err => console.warn("SW fail:", err));
