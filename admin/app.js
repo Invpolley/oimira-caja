@@ -20,7 +20,30 @@ const state = {
   evolMetric: "total", // "total" o "hoy"
   sacoTipos: [],       // catálogo de tipos de saco
   sacoPesos: [],       // catálogo de pesos de saco
+  canales: [],         // catálogo de canales de saldo (etiqueta/visibilidad)
 };
+
+// Map clave de canal -> ids de su tarjeta en el HTML
+const CANAL_CARD_IDS = {
+  Efectivo: { card: "cardCanalEfectivo", lbl: "lblCanalEfectivo" },
+  Punto:    { card: "cardCanalPunto",    lbl: "lblCanalPunto" },
+  PuntoBr:  { card: "cardCanalPuntoBr",  lbl: "lblCanalPuntoBr" },
+  USD:      { card: "cardCanalUSD",      lbl: "lblCanalUSD" },
+  BCU:      { card: "cardCanalBCU",      lbl: "lblCanalBCU" },
+};
+// Fallback de canales si Supabase no responde (la UI nunca queda vacía)
+const CANALES_FALLBACK = [
+  { key: "Efectivo", label: "Efectivo R$", moeda: "R$",  icon: "💵", orden: 1, activo: true },
+  { key: "Punto",    label: "Punto Bs",    moeda: "Bs",  icon: "📲", orden: 2, activo: true },
+  { key: "PuntoBr",  label: "Punto Br R$", moeda: "R$",  icon: "💳", orden: 3, activo: true },
+  { key: "USD",      label: "USD",         moeda: "USD", icon: "💵", orden: 4, activo: true },
+  { key: "BCU",      label: "BCU",         moeda: "Bs",  icon: "🏦", orden: 5, activo: true },
+];
+function canalDef(key) {
+  return (state.canales || []).find(c => c.key === key)
+      || CANALES_FALLBACK.find(c => c.key === key)
+      || { key, label: key, icon: "💰", activo: true };
+}
 
 // ============================================================
 // Utilidades
@@ -544,6 +567,7 @@ async function reload({ preserveExpanded = true } = {}) {
       fetchCajaSaldos(state.rango.desde, state.rango.hasta),
       fetchCajaRetiros(state.rango.desde, state.rango.hasta),
       fetchSacoCatalogos(),
+      fetchCanales(),
     ]);
     state.cierres = cierres;
     state.cajaSaldos = cajaSaldos;
@@ -560,6 +584,7 @@ async function reload({ preserveExpanded = true } = {}) {
     renderPorCategoria();
     renderSacosReporte();
     renderSacosAdmin();
+    renderCanalesAdmin();
     renderCajaSaldos();
     renderCajaRetiros();
     renderCajaEvolucion();
@@ -713,6 +738,67 @@ function wireSacosListeners() {
     $("nuevoPesoKg").value = "";
     await fetchSacoCatalogos(); renderSacosAdmin();
     toast("Peso agregado");
+  });
+}
+
+// ============================================================
+// 💰 Canales de saldo: renombrar / mostrar-ocultar (administrativo)
+// ============================================================
+async function fetchCanales() {
+  const { data } = await sb.from("canal_caja").select("*").order("orden");
+  state.canales = (data && data.length > 0) ? data : CANALES_FALLBACK.slice();
+}
+
+// Aplica etiquetas y visibilidad a las tarjetas de saldo del dashboard
+function aplicarLabelsCanales() {
+  Object.entries(CANAL_CARD_IDS).forEach(([key, ids]) => {
+    const def = canalDef(key);
+    const lbl = $(ids.lbl);
+    if (lbl) lbl.textContent = `${def.icon || "💰"} ${def.label || key}`;
+    const card = $(ids.card);
+    if (card) card.style.display = (def.activo === false) ? "none" : "";
+  });
+}
+
+function renderCanalesAdmin() {
+  const cont = $("canalesAdmin");
+  if (!cont) return;
+  const fuente = (state.canales && state.canales.length > 0) ? state.canales : CANALES_FALLBACK;
+  cont.innerHTML = fuente
+    .slice()
+    .sort((a, b) => (a.orden || 0) - (b.orden || 0))
+    .map(c => `
+      <div class="flex items-center gap-1 text-sm">
+        <span>${c.icon || "💰"}</span>
+        <input type="text" class="canal-label flex-1 p-1.5 border-2 border-gray-300 rounded text-sm"
+               data-key="${escapeHtml(c.key)}" value="${escapeHtml(c.label)}" />
+        <span class="text-[10px] text-gray-400 w-8 text-center">${escapeHtml(c.moeda || "")}</span>
+        <button type="button" data-key="${escapeHtml(c.key)}" data-activo="${c.activo !== false}"
+                class="canal-toggle text-[11px] px-1.5 py-0.5 rounded ${c.activo !== false ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'}">
+          ${c.activo !== false ? 'visible' : 'oculto'}
+        </button>
+        <button type="button" data-key="${escapeHtml(c.key)}" class="canal-save text-[11px] px-2 py-0.5 rounded bg-amber-600 text-white font-bold">💾</button>
+      </div>`).join("");
+
+  cont.querySelectorAll(".canal-save").forEach(b => b.onclick = async () => {
+    const key = b.dataset.key;
+    const inp = cont.querySelector(`.canal-label[data-key="${CSS.escape(key)}"]`);
+    const nuevo = (inp.value || "").trim();
+    if (!nuevo) { toast("El nombre no puede quedar vacío"); return; }
+    const { error } = await sb.from("canal_caja").update({ label: nuevo }).eq("key", key);
+    if (error) { toast("Error: " + error.message, 4000); return; }
+    await fetchCanales(); aplicarLabelsCanales(); renderCanalesAdmin();
+    toast("Nombre actualizado");
+  });
+
+  cont.querySelectorAll(".canal-toggle").forEach(b => b.onclick = async () => {
+    const key = b.dataset.key;
+    const nuevoActivo = !(b.dataset.activo === "true");
+    if (!nuevoActivo && !confirm(`¿Ocultar "${canalLabel(key)}"?\n\nDeja de mostrarse en las tarjetas y en los retiros. Esto CAMBIA lo que ves en la información general (los totales mostrados). La data guardada NO se borra y podés volver a mostrarlo cuando quieras.`)) return;
+    const { error } = await sb.from("canal_caja").update({ activo: nuevoActivo }).eq("key", key);
+    if (error) { toast("Error: " + error.message, 4000); return; }
+    await fetchCanales(); aplicarLabelsCanales(); renderCajaSaldos(); renderCanalesAdmin();
+    toast(nuevoActivo ? "Canal visible" : "Canal oculto");
   });
 }
 
@@ -1071,6 +1157,8 @@ async function fetchUltimoSaldo(beforeFecha) {
 
 // ------------- Render cards -------------
 function renderCajaSaldos() {
+  // Aplicar nombres/visibilidad de canales (renombrados desde el panel)
+  aplicarLabelsCanales();
   // El card superior muestra los saldos del último cierre disponible (más reciente)
   const latest = state.cajaSaldos[0];
   const label = $("cajaFechaLabel");
@@ -1151,10 +1239,10 @@ function renderCajaRetiros() {
 }
 
 function canalLabel(c) {
-  return { Efectivo: "Efectivo R$", Punto: "Punto Bs", PuntoBr: "Punto Br R$", USD: "USD", BCU: "BCU" }[c] || c;
+  return canalDef(c).label || c;
 }
 function canalIcon(c) {
-  return { Efectivo: "💵", Punto: "📲", PuntoBr: "💳", USD: "💵", BCU: "🏦" }[c] || "💰";
+  return canalDef(c).icon || "💰";
 }
 
 // ============================================================
@@ -1454,19 +1542,15 @@ const RETIRO_STATE = {
 };
 
 // Canales disponibles por moneda con label + ícono
-const CANALES_POR_MOEDA = {
-  "R$": [
-    { canal: "Efectivo", label: "Efectivo R$ (caja física)",   icon: "💵" },
-    { canal: "PuntoBr",  label: "Punto Br — POS Brasil",        icon: "💳" },
-  ],
-  "Bs": [
-    { canal: "Punto",    label: "Punto — Pago Móvil",           icon: "📲" },
-    { canal: "BCU",      label: "B.C.U — Cuenta BNC (Bs)",       icon: "🏦" },
-  ],
-  "USD": [
-    { canal: "USD",      label: "USD — Dólares físicos",        icon: "💵" },
-  ],
-};
+// Canales disponibles por moneda, derivados del catálogo (solo los activos).
+// Usa las etiquetas que el admin haya renombrado.
+function canalesPorMoeda(moeda) {
+  const fuente = (state.canales && state.canales.length > 0) ? state.canales : CANALES_FALLBACK;
+  return fuente
+    .filter(c => c.moeda === moeda && c.activo !== false)
+    .sort((a, b) => (a.orden || 0) - (b.orden || 0))
+    .map(c => ({ canal: c.key, label: c.label, icon: c.icon || "💰" }));
+}
 
 async function openRetiroModal() {
   // Reset
@@ -1503,7 +1587,7 @@ function selectMoeda(moeda) {
 
   // Renderizar canales disponibles para esta moneda
   const cont = $("rt_canalOptions");
-  const canales = CANALES_POR_MOEDA[moeda] || [];
+  const canales = canalesPorMoeda(moeda) || [];
   cont.innerHTML = canales.map(c => `
     <button type="button" data-canal="${c.canal}"
             class="rt-canal-btn flex items-center gap-2 p-2.5 border-2 border-gray-300 rounded-lg text-left hover:border-rose-400 hover:bg-rose-50 transition">

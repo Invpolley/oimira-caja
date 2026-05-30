@@ -296,32 +296,32 @@
     <!-- Cards por canal -->
     <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
       <!-- Efectivo R$ -->
-      <div class="kpi border-green-400">
-        <div class="kpi-label">💵 Efectivo R$</div>
+      <div class="kpi border-green-400" id="cardCanalEfectivo">
+        <div class="kpi-label" id="lblCanalEfectivo">💵 Efectivo R$</div>
         <div class="kpi-value mono text-green-700" id="cajaEfectivo">R$ 0,00</div>
         <div class="text-[10px] text-gray-500 mt-1" id="cajaEfectivoDetail"></div>
       </div>
       <!-- Punto Bs -->
-      <div class="kpi border-blue-400">
-        <div class="kpi-label">📲 Punto (Bs)</div>
+      <div class="kpi border-blue-400" id="cardCanalPunto">
+        <div class="kpi-label" id="lblCanalPunto">📲 Punto (Bs)</div>
         <div class="kpi-value mono text-blue-700" id="cajaPunto">Bs 0,00</div>
         <div class="text-[10px] text-gray-500 mt-1" id="cajaPuntoDetail"></div>
       </div>
       <!-- Punto Br R$ -->
-      <div class="kpi border-amber-400">
-        <div class="kpi-label">💳 Punto Br (R$)</div>
+      <div class="kpi border-amber-400" id="cardCanalPuntoBr">
+        <div class="kpi-label" id="lblCanalPuntoBr">💳 Punto Br (R$)</div>
         <div class="kpi-value mono text-amber-700" id="cajaPuntoBr">R$ 0,00</div>
         <div class="text-[10px] text-gray-500 mt-1" id="cajaPuntoBrDetail"></div>
       </div>
       <!-- USD -->
-      <div class="kpi border-emerald-500">
-        <div class="kpi-label">💵 USD</div>
+      <div class="kpi border-emerald-500" id="cardCanalUSD">
+        <div class="kpi-label" id="lblCanalUSD">💵 USD</div>
         <div class="kpi-value mono text-emerald-700" id="cajaUsd">US$ 0</div>
         <div class="text-[10px] text-gray-500 mt-1" id="cajaUsdDetail"></div>
       </div>
       <!-- BCU (Bs) -->
-      <div class="kpi border-indigo-400">
-        <div class="kpi-label">🏦 BCU (BNC Bs)</div>
+      <div class="kpi border-indigo-400" id="cardCanalBCU">
+        <div class="kpi-label" id="lblCanalBCU">🏦 BCU (BNC Bs)</div>
         <div class="kpi-value mono text-indigo-700" id="cajaBcu">Bs 0,00</div>
         <div class="text-[10px] text-gray-500 mt-1">Cuenta bancaria en Bolívares</div>
       </div>
@@ -526,6 +526,15 @@
       </div>
       <p class="text-[11px] text-gray-400 mt-2">Desactivar oculta la opción en la caja sin borrar historial. Borrar la elimina del catálogo (los cierres ya guardados conservan su dato).</p>
     </details>
+  </div>
+
+  <!-- 💰 Canales de saldo: renombrar / mostrar-ocultar (administrativo) -->
+  <div class="bg-white rounded-xl p-3 card">
+    <h2 class="text-base font-bold text-amber-800 mb-1">💰 Canales de saldo</h2>
+    <p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+      ⚠️ Cambiá solo el <b>nombre visible</b> de cada canal. Si <b>ocultás</b> un canal, deja de mostrarse en las tarjetas y en los retiros — eso <b>cambia lo que ves en la información general</b> (los totales mostrados), aunque la data guardada no se borra.
+    </p>
+    <div id="canalesAdmin" class="space-y-1"></div>
   </div>
 
   <!-- Footer info -->
