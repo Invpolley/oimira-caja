@@ -67,18 +67,16 @@ const state = {
 
 let categorias = [];   // catálogo de categorías de gastos
 let ingresosCatalog = []; // catálogo de formas de pago
-let sacoTipos = [];    // catálogo de tipos de saco (azul, rojo, especial...)
-let sacoPesos = [];    // catálogo de pesos disponibles (50, 45 kg...)
+let sacoProductos = [];   // catálogo de sacos (tipo + peso = un solo producto)
 
-// Fallbacks por si Supabase no responde (la UI nunca queda sin opciones)
-const SACO_TIPOS_FALLBACK = [
-  { nombre: "Azul", color: "#2563eb", orden: 1 },
-  { nombre: "Rojo", color: "#dc2626", orden: 2 },
-  { nombre: "Trigo especial", color: "#f59e0b", orden: 3 },
-];
-const SACO_PESOS_FALLBACK = [
-  { kg: 50, label: "50 kg", orden: 1 },
-  { kg: 45, label: "45 kg", orden: 2 },
+// Fallback por si Supabase no responde (la UI nunca queda sin opciones)
+const SACO_PRODUCTOS_FALLBACK = [
+  { nombre: "Azul", kg: 50, label: "Azul 50kg", color: "#2563eb", orden: 1 },
+  { nombre: "Azul", kg: 45, label: "Azul 45kg", color: "#2563eb", orden: 2 },
+  { nombre: "Rojo", kg: 50, label: "Rojo 50kg", color: "#dc2626", orden: 3 },
+  { nombre: "Rojo", kg: 45, label: "Rojo 45kg", color: "#dc2626", orden: 4 },
+  { nombre: "Trigo especial", kg: 50, label: "Trigo especial 50kg", color: "#f59e0b", orden: 5 },
+  { nombre: "Trigo especial", kg: 45, label: "Trigo especial 45kg", color: "#f59e0b", orden: 6 },
 ];
 
 // ⚠ Fallback hardcoded: si Supabase no responde o el catálogo está vacío,
@@ -278,12 +276,12 @@ function updateGastoField(e) {
 // ============================================================================
 // Sacos de trigo (tipo × peso × cantidad)
 // ============================================================================
-function sacoTiposSource() {
-  return (sacoTipos && sacoTipos.length > 0) ? sacoTipos : SACO_TIPOS_FALLBACK;
+function sacoProductosSource() {
+  return (sacoProductos && sacoProductos.length > 0) ? sacoProductos : SACO_PRODUCTOS_FALLBACK;
 }
-function sacoPesosSource() {
-  return (sacoPesos && sacoPesos.length > 0) ? sacoPesos : SACO_PESOS_FALLBACK;
-}
+// Clave única de un producto = "nombre|kg" (para el value del select)
+function sacoKey(nombre, kg) { return `${nombre}|${kg}`; }
+function sacoLabel(p) { return p.label || `${p.nombre} ${p.kg}kg`; }
 
 // Cálculo puro y testeado (ver outputs/sim/saco_sim.mjs)
 function calcSacos(sacos) {
@@ -320,21 +318,18 @@ function renderSacos() {
   if (!list) return;
   list.innerHTML = "";
 
-  const tipos = sacoTiposSource();
-  const pesos = sacoPesosSource();
+  const productos = sacoProductosSource();
 
   state.sacos.forEach((s, idx) => {
     const card = document.createElement("div");
     card.className = "flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2";
-    const tipoOpts = tipos.map(t =>
-      `<option value="${escapeHtml(t.nombre)}" ${s.tipo === t.nombre ? "selected" : ""}>${escapeHtml(t.nombre)}</option>`
-    ).join("");
-    const pesoOpts = pesos.map(p =>
-      `<option value="${p.kg}" ${Number(s.kg) === Number(p.kg) ? "selected" : ""}>${escapeHtml(p.label || (p.kg + " kg"))}</option>`
-    ).join("");
+    const selKey = sacoKey(s.tipo, s.kg);
+    const opts = productos.map(p => {
+      const k = sacoKey(p.nombre, p.kg);
+      return `<option value="${escapeHtml(k)}" ${selKey === k ? "selected" : ""}>${escapeHtml(sacoLabel(p))}</option>`;
+    }).join("");
     card.innerHTML = `
-      <select data-idx="${idx}" data-field="tipo" class="flex-1 p-2 border-2 border-gray-300 rounded-lg text-sm">${tipoOpts}</select>
-      <select data-idx="${idx}" data-field="kg" class="p-2 border-2 border-gray-300 rounded-lg text-sm">${pesoOpts}</select>
+      <select data-idx="${idx}" data-field="producto" class="flex-1 p-2 border-2 border-gray-300 rounded-lg text-sm">${opts}</select>
       <input type="number" inputmode="numeric" min="0" step="1" value="${parseInt(s.cantidad) || 0}"
              data-idx="${idx}" data-field="cantidad"
              class="w-16 p-2 border-2 border-gray-300 rounded-lg text-center text-sm font-semibold" />
@@ -343,20 +338,26 @@ function renderSacos() {
     list.appendChild(card);
   });
 
-  list.querySelectorAll("[data-field]").forEach(el => {
-    if (el.tagName === "INPUT") el.addEventListener("focus", e => e.target.select());
+  list.querySelectorAll('[data-field="producto"]').forEach(sel => {
+    sel.addEventListener("change", (e) => {
+      const i = parseInt(e.target.dataset.idx);
+      const [nombre, kg] = e.target.value.split("|");
+      state.sacos[i].tipo = nombre;
+      state.sacos[i].kg = parseFloat(kg) || 0;
+      updateSacosResumen();
+      saveDraft();
+    });
+  });
+  list.querySelectorAll('[data-field="cantidad"]').forEach(inp => {
+    inp.addEventListener("focus", e => e.target.select());
     const handler = (e) => {
       const i = parseInt(e.target.dataset.idx);
-      const field = e.target.dataset.field;
-      let val = e.target.value;
-      if (field === "cantidad") val = parseInt(val) || 0;
-      if (field === "kg") val = parseFloat(val) || 0;
-      state.sacos[i][field] = val;
+      state.sacos[i].cantidad = parseInt(e.target.value) || 0;
       updateSacosResumen();
       saveDraft();
     };
-    el.addEventListener("input", handler);
-    el.addEventListener("change", handler);
+    inp.addEventListener("input", handler);
+    inp.addEventListener("change", handler);
   });
   list.querySelectorAll('[data-action="del-saco"]').forEach(btn => {
     btn.addEventListener("click", (e) => {
@@ -489,21 +490,13 @@ async function loadCatalog() {
     ingresosCatalog = INGRESOS_CATALOG_FALLBACK.slice();
   }
 
-  // Tipos de saco
+  // Catálogo de sacos (tipo + peso = un solo producto)
   try {
     const { data, error } = await supabase
-      .from('saco_tipo').select('*').eq('activo', true).order('orden');
-    if (!error && data && data.length > 0) sacoTipos = data;
-  } catch (e) { console.warn("loadCatalog saco_tipo error:", e); }
-  if (!sacoTipos || sacoTipos.length === 0) sacoTipos = SACO_TIPOS_FALLBACK.slice();
-
-  // Pesos de saco
-  try {
-    const { data, error } = await supabase
-      .from('saco_peso').select('*').eq('activo', true).order('orden');
-    if (!error && data && data.length > 0) sacoPesos = data;
-  } catch (e) { console.warn("loadCatalog saco_peso error:", e); }
-  if (!sacoPesos || sacoPesos.length === 0) sacoPesos = SACO_PESOS_FALLBACK.slice();
+      .from('saco_producto').select('*').eq('activo', true).order('orden');
+    if (!error && data && data.length > 0) sacoProductos = data;
+  } catch (e) { console.warn("loadCatalog saco_producto error:", e); }
+  if (!sacoProductos || sacoProductos.length === 0) sacoProductos = SACO_PRODUCTOS_FALLBACK.slice();
 
   // Poblar ingresos preset si no hay nada cargado
   ensureIngresosPresets();
@@ -677,13 +670,9 @@ function bindStatic() {
   if (addSacoBtn) {
     addSacoBtn.addEventListener("click", () => {
       if (!Array.isArray(state.sacos)) state.sacos = [];
-      const tipos = sacoTiposSource();
-      const pesos = sacoPesosSource();
-      state.sacos.push({
-        tipo: tipos[0]?.nombre || "Azul",
-        kg: Number(pesos[0]?.kg) || 50,
-        cantidad: 1,
-      });
+      const productos = sacoProductosSource();
+      const p = productos[0] || { nombre: "Azul", kg: 50 };
+      state.sacos.push({ tipo: p.nombre, kg: Number(p.kg) || 50, cantidad: 1 });
       renderSacos();
       saveDraft();
     });

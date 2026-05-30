@@ -499,32 +499,18 @@
     </div>
 
     <details class="border-t border-gray-200 pt-2">
-      <summary class="cursor-pointer text-xs font-semibold text-gray-700 select-none">⚙️ Administrar tipos y pesos</summary>
-      <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <!-- Tipos -->
-        <div>
-          <div class="text-xs font-bold text-gray-600 mb-1">Tipos de saco</div>
-          <div id="sacoTiposAdmin" class="space-y-1"></div>
-          <div class="flex gap-1 mt-2">
-            <input id="nuevoTipoNombre" type="text" placeholder="Nombre (ej. Verde)"
-                   class="flex-1 p-1.5 border-2 border-gray-300 rounded text-sm"/>
-            <input id="nuevoTipoColor" type="color" value="#16a34a"
-                   class="w-9 h-9 border-2 border-gray-300 rounded p-0" title="Color"/>
-            <button id="addTipoBtn" type="button" class="px-3 bg-amber-600 text-white rounded text-sm font-bold">+</button>
-          </div>
-        </div>
-        <!-- Pesos -->
-        <div>
-          <div class="text-xs font-bold text-gray-600 mb-1">Pesos (kg)</div>
-          <div id="sacoPesosAdmin" class="space-y-1"></div>
-          <div class="flex gap-1 mt-2">
-            <input id="nuevoPesoKg" type="number" min="1" step="0.5" placeholder="kg (ej. 25)"
-                   class="flex-1 p-1.5 border-2 border-gray-300 rounded text-sm"/>
-            <button id="addPesoBtn" type="button" class="px-3 bg-amber-600 text-white rounded text-sm font-bold">+</button>
-          </div>
-        </div>
+      <summary class="cursor-pointer text-xs font-semibold text-gray-700 select-none">⚙️ Administrar sacos</summary>
+      <div id="sacoProductosAdmin" class="mt-2 space-y-1"></div>
+      <div class="flex gap-1 mt-2 items-center">
+        <input id="nuevoSacoNombre" type="text" placeholder="Tipo (ej. Azul)"
+               class="flex-1 p-1.5 border-2 border-gray-300 rounded text-sm"/>
+        <input id="nuevoSacoKg" type="number" min="1" step="0.5" placeholder="kg"
+               class="w-16 p-1.5 border-2 border-gray-300 rounded text-sm"/>
+        <input id="nuevoSacoColor" type="color" value="#2563eb"
+               class="w-9 h-9 border-2 border-gray-300 rounded p-0" title="Color"/>
+        <button id="addSacoProdBtn" type="button" class="px-3 bg-amber-600 text-white rounded text-sm font-bold">+</button>
       </div>
-      <p class="text-[11px] text-gray-400 mt-2">Desactivar oculta la opción en la caja sin borrar historial. Borrar la elimina del catálogo (los cierres ya guardados conservan su dato).</p>
+      <p class="text-[11px] text-gray-400 mt-2">Cada saco es <b>tipo + peso</b> (ej. "Azul 50kg"). Desactivar lo oculta de la caja sin borrar historial; borrar lo elimina del catálogo (los cierres ya guardados conservan su dato).</p>
     </details>
   </div>
 

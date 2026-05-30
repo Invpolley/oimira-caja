@@ -18,8 +18,7 @@ const state = {
   chart: null,
   cajaCharts: {},      // { efectivo, punto, puntoBr, usd }
   evolMetric: "total", // "total" o "hoy"
-  sacoTipos: [],       // catálogo de tipos de saco
-  sacoPesos: [],       // catálogo de pesos de saco
+  sacoProductos: [],   // catálogo de sacos (tipo + peso = un producto)
   canales: [],         // catálogo de canales de saldo (etiqueta/visibilidad)
 };
 
@@ -617,12 +616,8 @@ function setRango(desde, hasta) {
 // 🌾 Sacos de trigo: reporte de consumo + gestión de catálogo
 // ============================================================
 async function fetchSacoCatalogos() {
-  const [{ data: tipos }, { data: pesos }] = await Promise.all([
-    sb.from("saco_tipo").select("*").order("orden"),
-    sb.from("saco_peso").select("*").order("orden"),
-  ]);
-  state.sacoTipos = tipos || [];
-  state.sacoPesos = pesos || [];
+  const { data } = await sb.from("saco_producto").select("*").order("orden");
+  state.sacoProductos = data || [];
 }
 
 function renderSacosReporte() {
@@ -648,7 +643,7 @@ function renderSacosReporte() {
     return;
   }
 
-  const colorDe = (t) => (state.sacoTipos.find(x => x.nombre === t)?.color) || "#9ca3af";
+  const colorDe = (t) => (state.sacoProductos.find(x => x.nombre === t)?.color) || "#9ca3af";
   const filas = Object.entries(porTipo)
     .sort((a, b) => b[1].kg - a[1].kg)
     .map(([tipo, v]) => `
@@ -669,75 +664,50 @@ function renderSacosReporte() {
 }
 
 function renderSacosAdmin() {
-  const ct = $("sacoTiposAdmin");
-  const cp = $("sacoPesosAdmin");
-  if (ct) {
-    ct.innerHTML = state.sacoTipos.map(t => `
+  const cont = $("sacoProductosAdmin");
+  if (!cont) return;
+  cont.innerHTML = (state.sacoProductos || []).map(p => {
+    const label = p.label || `${p.nombre} ${p.kg}kg`;
+    const activo = p.activo !== false;
+    return `
       <div class="flex items-center gap-1 text-sm">
-        <span class="inline-block w-3 h-3 rounded-full" style="background:${t.color || '#9ca3af'}"></span>
-        <span class="flex-1 ${t.activo ? '' : 'line-through text-gray-400'}">${escapeHtml(t.nombre)}</span>
-        <button type="button" data-id="${t.id}" data-activo="${t.activo}" class="saco-tipo-toggle text-[11px] px-1.5 py-0.5 rounded ${t.activo ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'}">${t.activo ? 'activo' : 'off'}</button>
-        <button type="button" data-id="${t.id}" class="saco-tipo-del text-rose-600 px-1">🗑</button>
-      </div>`).join("") || `<div class="text-[11px] text-gray-400">Sin tipos.</div>`;
-  }
-  if (cp) {
-    cp.innerHTML = state.sacoPesos.map(p => `
-      <div class="flex items-center gap-1 text-sm">
-        <span class="flex-1 ${p.activo ? '' : 'line-through text-gray-400'}">${escapeHtml(p.label || (p.kg + ' kg'))}</span>
-        <button type="button" data-id="${p.id}" data-activo="${p.activo}" class="saco-peso-toggle text-[11px] px-1.5 py-0.5 rounded ${p.activo ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'}">${p.activo ? 'activo' : 'off'}</button>
-        <button type="button" data-id="${p.id}" class="saco-peso-del text-rose-600 px-1">🗑</button>
-      </div>`).join("") || `<div class="text-[11px] text-gray-400">Sin pesos.</div>`;
-  }
+        <span class="inline-block w-3 h-3 rounded-full" style="background:${p.color || '#9ca3af'}"></span>
+        <span class="flex-1 ${activo ? '' : 'line-through text-gray-400'}">${escapeHtml(label)}</span>
+        <button type="button" data-id="${p.id}" data-activo="${activo}" class="saco-prod-toggle text-[11px] px-1.5 py-0.5 rounded ${activo ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'}">${activo ? 'activo' : 'off'}</button>
+        <button type="button" data-id="${p.id}" class="saco-prod-del text-rose-600 px-1">🗑</button>
+      </div>`;
+  }).join("") || `<div class="text-[11px] text-gray-400">Sin sacos. Agregá uno abajo.</div>`;
   wireSacosRowListeners();
 }
 
 function wireSacosRowListeners() {
-  document.querySelectorAll(".saco-tipo-toggle").forEach(b => b.onclick = async () => {
-    await sb.from("saco_tipo").update({ activo: !(b.dataset.activo === "true") }).eq("id", b.dataset.id);
+  document.querySelectorAll(".saco-prod-toggle").forEach(b => b.onclick = async () => {
+    await sb.from("saco_producto").update({ activo: !(b.dataset.activo === "true") }).eq("id", b.dataset.id);
     await fetchSacoCatalogos(); renderSacosAdmin();
   });
-  document.querySelectorAll(".saco-tipo-del").forEach(b => b.onclick = async () => {
-    if (!confirm("¿Borrar este tipo del catálogo? Los cierres ya guardados conservan su dato.")) return;
-    await sb.from("saco_tipo").delete().eq("id", b.dataset.id);
+  document.querySelectorAll(".saco-prod-del").forEach(b => b.onclick = async () => {
+    if (!confirm("¿Borrar este saco del catálogo? Los cierres ya guardados conservan su dato.")) return;
+    await sb.from("saco_producto").delete().eq("id", b.dataset.id);
     await fetchSacoCatalogos(); renderSacosAdmin();
-    toast("Tipo borrado");
-  });
-  document.querySelectorAll(".saco-peso-toggle").forEach(b => b.onclick = async () => {
-    await sb.from("saco_peso").update({ activo: !(b.dataset.activo === "true") }).eq("id", b.dataset.id);
-    await fetchSacoCatalogos(); renderSacosAdmin();
-  });
-  document.querySelectorAll(".saco-peso-del").forEach(b => b.onclick = async () => {
-    if (!confirm("¿Borrar este peso del catálogo? Los cierres ya guardados conservan su dato.")) return;
-    await sb.from("saco_peso").delete().eq("id", b.dataset.id);
-    await fetchSacoCatalogos(); renderSacosAdmin();
-    toast("Peso borrado");
+    toast("Saco borrado");
   });
 }
 
 function wireSacosListeners() {
-  const addTipo = $("addTipoBtn");
-  if (addTipo) addTipo.addEventListener("click", async () => {
-    const nombre = ($("nuevoTipoNombre").value || "").trim();
-    const color = $("nuevoTipoColor").value || "#9ca3af";
-    if (!nombre) { toast("Poné un nombre"); return; }
-    const orden = (state.sacoTipos.length || 0) + 1;
-    const { error } = await sb.from("saco_tipo").insert({ nombre, color, orden, activo: true });
-    if (error) { toast("Error: " + error.message, 4000); return; }
-    $("nuevoTipoNombre").value = "";
+  const add = $("addSacoProdBtn");
+  if (add) add.addEventListener("click", async () => {
+    const nombre = ($("nuevoSacoNombre").value || "").trim();
+    const kg = parseFloat($("nuevoSacoKg").value);
+    const color = $("nuevoSacoColor").value || "#2563eb";
+    if (!nombre) { toast("Poné el tipo (ej. Azul)"); return; }
+    if (!kg || kg <= 0) { toast("Poné el peso en kg"); return; }
+    const orden = (state.sacoProductos.length || 0) + 1;
+    const label = `${nombre} ${kg}kg`;
+    const { error } = await sb.from("saco_producto").insert({ nombre, kg, label, color, orden, activo: true });
+    if (error) { toast(error.message.includes("duplicate") ? "Ese saco ya existe" : "Error: " + error.message, 4000); return; }
+    $("nuevoSacoNombre").value = ""; $("nuevoSacoKg").value = "";
     await fetchSacoCatalogos(); renderSacosAdmin();
-    toast("Tipo agregado");
-  });
-
-  const addPeso = $("addPesoBtn");
-  if (addPeso) addPeso.addEventListener("click", async () => {
-    const kg = parseFloat($("nuevoPesoKg").value);
-    if (!kg || kg <= 0) { toast("Peso inválido"); return; }
-    const orden = (state.sacoPesos.length || 0) + 1;
-    const { error } = await sb.from("saco_peso").insert({ kg, label: kg + " kg", orden, activo: true });
-    if (error) { toast(error.message.includes("duplicate") ? "Ese peso ya existe" : "Error: " + error.message, 4000); return; }
-    $("nuevoPesoKg").value = "";
-    await fetchSacoCatalogos(); renderSacosAdmin();
-    toast("Peso agregado");
+    toast("Saco agregado");
   });
 }
 
