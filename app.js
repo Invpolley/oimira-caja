@@ -11,12 +11,15 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // La cajera puede tener el celu en cualquier zona horaria y el cierre siempre
 // se guarda con la fecha real de la panadería (UTC-4).
 // ============================================================================
-const OIMIRA_TZ = "America/Caracas"; // = UTC-4, igual que La Paz, Bolivia
-const _DATE_FMT = new Intl.DateTimeFormat("en-CA", {
-  timeZone: OIMIRA_TZ, year: "numeric", month: "2-digit", day: "2-digit"
-});
+// Huso horario de NEGOCIO fijo (Venezuela, UTC-4). NO depender del device:
+// si el celular está en otro huso (UTC, Brasil, automático), después de las
+// 20:00 el getDate() saltaba al día siguiente → la caja no cuadraba.
+// Anclando a America/Caracas la fecha es siempre la del negocio.
+const APP_TZ = "America/Caracas";
 function todayLocalISO() {
-  return _DATE_FMT.format(new Date()); // "YYYY-MM-DD" en hora Caracas/La Paz
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: APP_TZ, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date()); // => "YYYY-MM-DD"
 }
 
 // ============================================================================
@@ -51,7 +54,8 @@ const state = {
   cajera: loadCajera(),
   ingresos: [],   // [{nombre, moeda, monto, preset, id?}]
   gastos: [],     // [{descripcion, monto, moeda, categoria, id?}]
-  sacosTrigo: 0,
+  sacos: [],      // [{tipo, kg, cantidad, id?}] — detalle de sacos del día
+  sacosTrigo: 0,  // total derivado (suma de cantidades) — legacy/compat
   tickets: 0,
   observacoes: "",
   cierreId: null, // UUID del cierre actual (si ya existe en DB)
@@ -63,6 +67,19 @@ const state = {
 
 let categorias = [];   // catálogo de categorías de gastos
 let ingresosCatalog = []; // catálogo de formas de pago
+let sacoTipos = [];    // catálogo de tipos de saco (azul, rojo, especial...)
+let sacoPesos = [];    // catálogo de pesos disponibles (50, 45 kg...)
+
+// Fallbacks por si Supabase no responde (la UI nunca queda sin opciones)
+const SACO_TIPOS_FALLBACK = [
+  { nombre: "Azul", color: "#2563eb", orden: 1 },
+  { nombre: "Rojo", color: "#dc2626", orden: 2 },
+  { nombre: "Trigo especial", color: "#f59e0b", orden: 3 },
+];
+const SACO_PESOS_FALLBACK = [
+  { kg: 50, label: "50 kg", orden: 1 },
+  { kg: 45, label: "45 kg", orden: 2 },
+];
 
 // ⚠ Fallback hardcoded: si Supabase no responde o el catálogo está vacío,
 // usar estos 6 presets para que la UI nunca se quede sin inputs.
@@ -258,6 +275,102 @@ function updateGastoField(e) {
   saveDraft();
 }
 
+// ============================================================================
+// Sacos de trigo (tipo × peso × cantidad)
+// ============================================================================
+function sacoTiposSource() {
+  return (sacoTipos && sacoTipos.length > 0) ? sacoTipos : SACO_TIPOS_FALLBACK;
+}
+function sacoPesosSource() {
+  return (sacoPesos && sacoPesos.length > 0) ? sacoPesos : SACO_PESOS_FALLBACK;
+}
+
+// Cálculo puro y testeado (ver outputs/sim/saco_sim.mjs)
+function calcSacos(sacos) {
+  let totalSacos = 0, totalKg = 0;
+  const porTipo = {};
+  (sacos || []).forEach(s => {
+    const cant = parseInt(s.cantidad) || 0;
+    const kg = parseFloat(s.kg) || 0;
+    if (cant <= 0) return;
+    totalSacos += cant;
+    totalKg += cant * kg;
+    porTipo[s.tipo] = porTipo[s.tipo] || { sacos: 0, kg: 0 };
+    porTipo[s.tipo].sacos += cant;
+    porTipo[s.tipo].kg += cant * kg;
+  });
+  return { totalSacos, totalKg, porTipo };
+}
+
+function updateSacosResumen() {
+  const { totalSacos, totalKg } = calcSacos(state.sacos);
+  state.sacosTrigo = totalSacos; // mantener total derivado para compat
+  const hidden = document.getElementById("sacosTrigo");
+  if (hidden) hidden.value = totalSacos;
+  const res = document.getElementById("sacosResumen");
+  if (res) {
+    const kgFmt = totalKg.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+    res.textContent = `${totalSacos} saco${totalSacos === 1 ? "" : "s"} · ${kgFmt} kg`;
+  }
+}
+
+function renderSacos() {
+  if (!Array.isArray(state.sacos)) state.sacos = [];
+  const list = document.getElementById("sacosList");
+  if (!list) return;
+  list.innerHTML = "";
+
+  const tipos = sacoTiposSource();
+  const pesos = sacoPesosSource();
+
+  state.sacos.forEach((s, idx) => {
+    const card = document.createElement("div");
+    card.className = "flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2";
+    const tipoOpts = tipos.map(t =>
+      `<option value="${escapeHtml(t.nombre)}" ${s.tipo === t.nombre ? "selected" : ""}>${escapeHtml(t.nombre)}</option>`
+    ).join("");
+    const pesoOpts = pesos.map(p =>
+      `<option value="${p.kg}" ${Number(s.kg) === Number(p.kg) ? "selected" : ""}>${escapeHtml(p.label || (p.kg + " kg"))}</option>`
+    ).join("");
+    card.innerHTML = `
+      <select data-idx="${idx}" data-field="tipo" class="flex-1 p-2 border-2 border-gray-300 rounded-lg text-sm">${tipoOpts}</select>
+      <select data-idx="${idx}" data-field="kg" class="p-2 border-2 border-gray-300 rounded-lg text-sm">${pesoOpts}</select>
+      <input type="number" inputmode="numeric" min="0" step="1" value="${parseInt(s.cantidad) || 0}"
+             data-idx="${idx}" data-field="cantidad"
+             class="w-16 p-2 border-2 border-gray-300 rounded-lg text-center text-sm font-semibold" />
+      <span class="delete-btn text-rose-600 cursor-pointer px-1" data-idx="${idx}" data-action="del-saco">🗑</span>
+    `;
+    list.appendChild(card);
+  });
+
+  list.querySelectorAll("[data-field]").forEach(el => {
+    if (el.tagName === "INPUT") el.addEventListener("focus", e => e.target.select());
+    const handler = (e) => {
+      const i = parseInt(e.target.dataset.idx);
+      const field = e.target.dataset.field;
+      let val = e.target.value;
+      if (field === "cantidad") val = parseInt(val) || 0;
+      if (field === "kg") val = parseFloat(val) || 0;
+      state.sacos[i][field] = val;
+      updateSacosResumen();
+      saveDraft();
+    };
+    el.addEventListener("input", handler);
+    el.addEventListener("change", handler);
+  });
+  list.querySelectorAll('[data-action="del-saco"]').forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      const i = parseInt(e.target.dataset.idx);
+      state.sacos.splice(i, 1);
+      renderSacos();
+      updateSacosResumen();
+      saveDraft();
+    });
+  });
+
+  updateSacosResumen();
+}
+
 function updateTotals() {
   const sumRsIng = state.ingresos.filter(i => i.moeda === "R$").reduce((s, i) => s + (i.monto || 0), 0);
   const sumBsIng = state.ingresos.filter(i => i.moeda === "Bs").reduce((s, i) => s + (i.monto || 0), 0);
@@ -376,6 +489,22 @@ async function loadCatalog() {
     ingresosCatalog = INGRESOS_CATALOG_FALLBACK.slice();
   }
 
+  // Tipos de saco
+  try {
+    const { data, error } = await supabase
+      .from('saco_tipo').select('*').eq('activo', true).order('orden');
+    if (!error && data && data.length > 0) sacoTipos = data;
+  } catch (e) { console.warn("loadCatalog saco_tipo error:", e); }
+  if (!sacoTipos || sacoTipos.length === 0) sacoTipos = SACO_TIPOS_FALLBACK.slice();
+
+  // Pesos de saco
+  try {
+    const { data, error } = await supabase
+      .from('saco_peso').select('*').eq('activo', true).order('orden');
+    if (!error && data && data.length > 0) sacoPesos = data;
+  } catch (e) { console.warn("loadCatalog saco_peso error:", e); }
+  if (!sacoPesos || sacoPesos.length === 0) sacoPesos = SACO_PESOS_FALLBACK.slice();
+
   // Poblar ingresos preset si no hay nada cargado
   ensureIngresosPresets();
 }
@@ -410,7 +539,7 @@ async function loadExistingCierre() {
   // Intentar traer el cierre del día si ya existe
   const { data, error } = await supabase
     .from('dia_cierre')
-    .select('*, forma_pago_extra(*), dia_gasto(*)')
+    .select('*, forma_pago_extra(*), dia_gasto(*), dia_saco(*)')
     .eq('fecha', state.fecha)
     .maybeSingle();
 
@@ -462,6 +591,14 @@ async function loadExistingCierre() {
     moeda: g.moeda,
     categoria: g.categoria,
   }));
+
+  // Sacos detallados
+  state.sacos = (data.dia_saco || []).map(s => ({
+    id: s.id,
+    tipo: s.tipo,
+    kg: Number(s.kg) || 0,
+    cantidad: parseInt(s.cantidad) || 0,
+  }));
 }
 
 function bindStatic() {
@@ -473,6 +610,7 @@ function bindStatic() {
     state.cierreId = null;
     state.ingresos = [];
     state.gastos = [];
+    state.sacos = [];
     state.transmittedAt = null;
     state.unlockUntil = 0;
     // Reset de tasas al default — si no, quedan pegadas las del día anterior
@@ -534,12 +672,24 @@ function bindStatic() {
     saveDraft();
   });
 
-  // Sacos / Tickets (con autoselect al tocar)
-  const sacos = document.getElementById("sacosTrigo");
-  sacos.addEventListener("focus", e => e.target.select());
-  sacos.addEventListener("input", e => {
-    state.sacosTrigo = parseInt(e.target.value) || 0; saveDraft();
-  });
+  // Sacos de trigo: botón para agregar una fila (tipo × peso × cantidad)
+  const addSacoBtn = document.getElementById("addSacoBtn");
+  if (addSacoBtn) {
+    addSacoBtn.addEventListener("click", () => {
+      if (!Array.isArray(state.sacos)) state.sacos = [];
+      const tipos = sacoTiposSource();
+      const pesos = sacoPesosSource();
+      state.sacos.push({
+        tipo: tipos[0]?.nombre || "Azul",
+        kg: Number(pesos[0]?.kg) || 50,
+        cantidad: 1,
+      });
+      renderSacos();
+      saveDraft();
+    });
+  }
+
+  // Tickets (con autoselect al tocar)
   const tickets = document.getElementById("tickets");
   tickets.addEventListener("focus", e => e.target.select());
   tickets.addEventListener("input", e => {
@@ -611,6 +761,7 @@ function bindStatic() {
       // Resetear state de ingresos/gastos/tasas/campos
       state.ingresos = [];
       state.gastos = [];
+      state.sacos = [];
       state.sacosTrigo = 0;
       state.tickets = 0;
       state.observacoes = "";
@@ -700,7 +851,7 @@ function applyLockState() {
   unlockedBanner.classList.toggle("hidden", !inUnlock);
 
   // Deshabilitar inputs
-  const editables = document.querySelectorAll("#fecha, #sacosTrigo, #tickets, #observacoes, #addIngresoBtn, #addGastoBtn, #ingresosList input, #gastosList input, #gastosList select, #ingresosList button, #gastosList button, #enviarBtn, #guardarBtn");
+  const editables = document.querySelectorAll("#fecha, #sacosTrigo, #tickets, #observacoes, #addIngresoBtn, #addGastoBtn, #addSacoBtn, #ingresosList input, #gastosList input, #gastosList select, #sacosList input, #sacosList select, #ingresosList button, #gastosList button, #enviarBtn, #guardarBtn");
   editables.forEach(el => {
     // fecha siempre se puede cambiar (para ver otros días)
     if (el.id === "fecha") return;
@@ -821,6 +972,7 @@ function renderAll() {
   if (tu) tu.value = state.tasaUsdRs;
   renderIngresos();
   renderGastos();
+  renderSacos();
   updateTotals();
 }
 
@@ -858,7 +1010,7 @@ async function enviarCierre(transmitir = true) {
       usd_usd: getPreset('USD'),
       tasa_bs_rs:  Number(state.tasaBsRs)  || TASA_BS_DEFAULT,
       tasa_usd_rs: Number(state.tasaUsdRs) || TASA_USD_DEFAULT,
-      sacos_trigo: state.sacosTrigo,
+      sacos_trigo: calcSacos(state.sacos).totalSacos, // total derivado (compat)
       tickets: state.tickets,
       observacoes: state.observacoes,
       device: DEVICE_NAME,
@@ -888,6 +1040,7 @@ async function enviarCierre(transmitir = true) {
     // Borrar formas de pago extra existentes + gastos, luego reinsertar
     await supabase.from('forma_pago_extra').delete().eq('dia_cierre_id', cierreId);
     await supabase.from('dia_gasto').delete().eq('dia_cierre_id', cierreId);
+    await supabase.from('dia_saco').delete().eq('dia_cierre_id', cierreId);
 
     // Insert formas de pago extra (custom, no preset)
     const extras = state.ingresos
@@ -916,6 +1069,20 @@ async function enviarCierre(transmitir = true) {
     if (gastos.length > 0) {
       const { error: e3 } = await supabase.from('dia_gasto').insert(gastos);
       if (e3) throw e3;
+    }
+
+    // Insert sacos detallados (solo filas con cantidad > 0)
+    const sacos = (state.sacos || [])
+      .filter(s => (parseInt(s.cantidad) || 0) > 0)
+      .map(s => ({
+        dia_cierre_id: cierreId,
+        tipo: s.tipo,
+        kg: Number(s.kg) || 0,
+        cantidad: parseInt(s.cantidad) || 0,
+      }));
+    if (sacos.length > 0) {
+      const { error: e4 } = await supabase.from('dia_saco').insert(sacos);
+      if (e4) throw e4;
     }
 
     if (transmitir) {
