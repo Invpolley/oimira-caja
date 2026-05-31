@@ -491,36 +491,104 @@
     <div id="porCategoria" class="space-y-2"></div>
   </div>
 
-  <!-- 🌾 Sacos de trigo: reporte de consumo + gestión de catálogo (administrativo) -->
+  <!-- 🌾 Trigo: existencia + consumo + gráficos + pronóstico + costo (uso diario) -->
   <div class="bg-white rounded-xl p-3 card">
-    <h2 class="text-base font-bold text-amber-800 mb-2">🌾 Sacos de trigo</h2>
+    <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+      <h2 class="text-base font-bold text-amber-800">🌾 Trigo</h2>
+      <div class="flex gap-1">
+        <button id="btnAjusteStock" class="px-2 py-1 bg-amber-600 text-white rounded text-[11px] font-semibold hover:bg-amber-700">📦 Ajustar existencia</button>
+        <button id="btnRegistrarCompra" class="px-2 py-1 bg-emerald-600 text-white rounded text-[11px] font-semibold hover:bg-emerald-700">🛒 Registrar compra</button>
+      </div>
+    </div>
+    <div id="sacosAlerta" class="hidden mb-2 p-2 bg-rose-50 border border-rose-300 rounded text-xs font-semibold text-rose-800"></div>
+
+    <div class="text-[11px] font-bold text-gray-500 mb-1">📦 Existencia actual</div>
+    <div id="sacosInventario" class="text-sm mb-3"></div>
+
+    <div class="text-[11px] font-bold text-gray-500 mb-1 border-t border-gray-100 pt-2">📊 Consumo del período</div>
     <div id="sacosReporte" class="space-y-1 text-sm mb-2">
       <div class="text-xs text-gray-400">Sin datos en el rango.</div>
     </div>
+    <div id="sacosPronostico" class="text-xs text-gray-700 mb-1"></div>
+    <div id="sacosCosto" class="text-xs text-gray-700 mb-3"></div>
 
-    <details class="border-t border-gray-200 pt-2">
-      <summary class="cursor-pointer text-xs font-semibold text-gray-700 select-none">⚙️ Administrar sacos</summary>
-      <div id="sacoProductosAdmin" class="mt-2 space-y-1"></div>
+    <div class="space-y-3 border-t border-gray-100 pt-2">
+      <div>
+        <div class="text-[11px] font-bold text-gray-500 mb-1">Uso diario (últimos 30 días)</div>
+        <div style="height:130px"><canvas id="chartSacoDiario"></canvas></div>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <div class="text-[11px] font-bold text-gray-500 mb-1">Uso mensual</div>
+          <div style="height:140px"><canvas id="chartSacoMensual"></canvas></div>
+        </div>
+        <div>
+          <div class="text-[11px] font-bold text-gray-500 mb-1">Por tipo de trigo</div>
+          <div style="height:140px"><canvas id="chartSacoTipo"></canvas></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⚙️ Configuración (avanzado) — separada del uso diario -->
+  <div class="bg-white rounded-xl p-3 card">
+    <details>
+      <summary class="cursor-pointer text-base font-bold text-gray-600 select-none">⚙️ Configuración (avanzado)</summary>
+      <p class="text-[11px] text-gray-400 mt-1 mb-3">Esto NO es para el día a día. Acá configurás los tipos de saco y los nombres de los canales de saldo.</p>
+
+      <div class="text-xs font-bold text-gray-600 mb-1">🌾 Sacos (tipo + peso)</div>
+      <div id="sacoProductosAdmin" class="space-y-1"></div>
       <div class="flex gap-1 mt-2 items-center">
-        <input id="nuevoSacoNombre" type="text" placeholder="Tipo (ej. Azul)"
-               class="flex-1 p-1.5 border-2 border-gray-300 rounded text-sm"/>
-        <input id="nuevoSacoKg" type="number" min="1" step="0.5" placeholder="kg"
-               class="w-16 p-1.5 border-2 border-gray-300 rounded text-sm"/>
-        <input id="nuevoSacoColor" type="color" value="#2563eb"
-               class="w-9 h-9 border-2 border-gray-300 rounded p-0" title="Color"/>
+        <input id="nuevoSacoNombre" type="text" placeholder="Tipo (ej. Azul)" class="flex-1 p-1.5 border-2 border-gray-300 rounded text-sm"/>
+        <input id="nuevoSacoKg" type="number" min="1" step="0.5" placeholder="kg" class="w-16 p-1.5 border-2 border-gray-300 rounded text-sm"/>
+        <input id="nuevoSacoColor" type="color" value="#2563eb" class="w-9 h-9 border-2 border-gray-300 rounded p-0" title="Color"/>
         <button id="addSacoProdBtn" type="button" class="px-3 bg-amber-600 text-white rounded text-sm font-bold">+</button>
       </div>
-      <p class="text-[11px] text-gray-400 mt-2">Cada saco es <b>tipo + peso</b> (ej. "Azul 50kg"). Desactivar lo oculta de la caja sin borrar historial; borrar lo elimina del catálogo (los cierres ya guardados conservan su dato).</p>
+      <p class="text-[11px] text-gray-400 mt-2">Cada saco es <b>tipo + peso</b> (ej. "Azul 50kg"). Desactivar lo oculta de la caja sin borrar historial; borrar lo elimina del catálogo.</p>
+
+      <div class="text-xs font-bold text-gray-600 mb-1 mt-4 border-t border-gray-100 pt-3">💰 Canales de saldo</div>
+      <p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-2">⚠️ Cambiá solo el <b>nombre visible</b>. Si <b>ocultás</b> un canal, cambia lo que se ve en los totales (la data no se borra).</p>
+      <div id="canalesAdmin" class="space-y-1"></div>
     </details>
   </div>
 
-  <!-- 💰 Canales de saldo: renombrar / mostrar-ocultar (administrativo) -->
-  <div class="bg-white rounded-xl p-3 card">
-    <h2 class="text-base font-bold text-amber-800 mb-1">💰 Canales de saldo</h2>
-    <p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-2">
-      ⚠️ Cambiá solo el <b>nombre visible</b> de cada canal. Si <b>ocultás</b> un canal, deja de mostrarse en las tarjetas y en los retiros — eso <b>cambia lo que ves en la información general</b> (los totales mostrados), aunque la data guardada no se borra.
-    </p>
-    <div id="canalesAdmin" class="space-y-1"></div>
+  <!-- Modal: Ajustar existencia -->
+  <div id="modalAjusteStock" class="hidden fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-3">
+    <div class="bg-white rounded-2xl p-4 max-w-sm w-full max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-lg font-bold text-amber-800">📦 Ajustar existencia</h2>
+        <button class="close-modal text-2xl text-gray-400 hover:text-gray-700" data-modal="modalAjusteStock">&times;</button>
+      </div>
+      <p class="text-xs text-gray-500 mb-3">Poné el stock actual de cada saco (conteo físico). Desde hoy, el consumo de la caja se resta solo. "mín" = avisar cuando baje de ese número.</p>
+      <div class="flex gap-2 text-[10px] text-gray-400 font-bold px-1"><span class="flex-1">Saco</span><span class="w-20 text-center">stock</span><span class="w-16 text-center">mín</span></div>
+      <div id="ajusteStockList" class="space-y-2 mt-1"></div>
+      <button id="ajusteStockGuardar" class="mt-3 w-full py-3 bg-amber-600 text-white rounded-xl font-bold">Guardar existencia</button>
+    </div>
+  </div>
+
+  <!-- Modal: Registrar compra -->
+  <div id="modalCompra" class="hidden fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-3">
+    <div class="bg-white rounded-2xl p-4 max-w-sm w-full">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-lg font-bold text-emerald-700">🛒 Registrar compra</h2>
+        <button class="close-modal text-2xl text-gray-400 hover:text-gray-700" data-modal="modalCompra">&times;</button>
+      </div>
+      <label class="text-xs font-semibold text-gray-700">Saco</label>
+      <select id="compraProducto" class="w-full p-2 border-2 border-gray-300 rounded-lg mb-2"></select>
+      <div class="grid grid-cols-2 gap-2 mb-2">
+        <div><label class="text-xs font-semibold text-gray-700">Cantidad</label><input id="compraCantidad" type="number" min="1" class="w-full p-2 border-2 border-gray-300 rounded-lg"/></div>
+        <div><label class="text-xs font-semibold text-gray-700">Fecha</label><input id="compraFecha" type="date" class="w-full p-2 border-2 border-gray-300 rounded-lg"/></div>
+      </div>
+      <div class="grid grid-cols-2 gap-2 mb-3">
+        <div><label class="text-xs font-semibold text-gray-700">Costo (opcional)</label><input id="compraCosto" type="number" min="0" step="0.01" class="w-full p-2 border-2 border-gray-300 rounded-lg" placeholder="0,00"/></div>
+        <div><label class="text-xs font-semibold text-gray-700">Moneda</label>
+          <select id="compraMoeda" class="w-full p-2 border-2 border-gray-300 rounded-lg">
+            <option value="R$">R$</option><option value="Bs">Bs</option><option value="USD">USD</option>
+          </select>
+        </div>
+      </div>
+      <button id="compraGuardar" class="w-full py-3 bg-emerald-600 text-white rounded-xl font-bold">Guardar compra</button>
+    </div>
   </div>
 
   <!-- Footer info -->

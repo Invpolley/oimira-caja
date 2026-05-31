@@ -20,6 +20,8 @@ const state = {
   evolMetric: "total", // "total" o "hoy"
   sacoProductos: [],   // catálogo de sacos (tipo + peso = un producto)
   canales: [],         // catálogo de canales de saldo (etiqueta/visibilidad)
+  sacoCompras: [],     // compras/recepciones de sacos
+  sacoConsumo: [],     // consumo histórico (vista saco_consumo_diario)
 };
 
 // Map clave de canal -> ids de su tarjeta en el HTML
@@ -567,6 +569,8 @@ async function reload({ preserveExpanded = true } = {}) {
       fetchCajaRetiros(state.rango.desde, state.rango.hasta),
       fetchSacoCatalogos(),
       fetchCanales(),
+      fetchSacoCompras(),
+      fetchSacoConsumo(),
     ]);
     state.cierres = cierres;
     state.cajaSaldos = cajaSaldos;
@@ -582,6 +586,8 @@ async function reload({ preserveExpanded = true } = {}) {
     renderPorCajera();
     renderPorCategoria();
     renderSacosReporte();
+    renderSacosInventario();
+    renderSacosAnalitica();
     renderSacosAdmin();
     renderCanalesAdmin();
     renderCajaSaldos();
@@ -775,6 +781,198 @@ function renderCanalesAdmin() {
 // ============================================================
 // Init + event listeners
 // ============================================================
+// ============================================================
+// 🌾 Inventario, gráficos, pronóstico y costo de trigo
+// ============================================================
+async function fetchSacoCompras() {
+  const { data } = await sb.from("saco_compra").select("*").order("fecha", { ascending: false });
+  state.sacoCompras = data || [];
+}
+async function fetchSacoConsumo() {
+  const { data } = await sb.from("saco_consumo_diario").select("*").gte("fecha", daysAgo(190)).order("fecha");
+  state.sacoConsumo = data || [];
+}
+
+function _stockActual(prod) {
+  if (!prod.stock_fecha) return null; // sin ajustar todavía
+  const F = prod.stock_fecha;
+  const cons = (state.sacoConsumo || [])
+    .filter(c => c.tipo === prod.nombre && Number(c.kg) === Number(prod.kg) && c.fecha > F)
+    .reduce((s, c) => s + (parseInt(c.cantidad) || 0), 0);
+  const comp = (state.sacoCompras || [])
+    .filter(c => c.nombre === prod.nombre && Number(c.kg) === Number(prod.kg) && c.fecha > F)
+    .reduce((s, c) => s + (parseInt(c.cantidad) || 0), 0);
+  return (Number(prod.stock_base) || 0) - cons + comp;
+}
+function _consumoPromDiario(ventana) {
+  ventana = ventana || 30;
+  const desde = daysAgo(ventana);
+  const total = (state.sacoConsumo || []).filter(c => c.fecha > desde).reduce((s, c) => s + (parseInt(c.cantidad) || 0), 0);
+  return total / ventana;
+}
+function _consumoPorMes() {
+  const m = {};
+  (state.sacoConsumo || []).forEach(c => { const k = c.fecha.slice(0, 7); m[k] = (m[k] || 0) + (parseInt(c.cantidad) || 0); });
+  return m;
+}
+function _pronosticoProxMes(k) {
+  k = k || 3;
+  const mesActual = todayISO().slice(0, 7);
+  const pm = _consumoPorMes();
+  const meses = Object.keys(pm).filter(x => x < mesActual).sort();
+  const ult = meses.slice(-k);
+  if (!ult.length) return 0;
+  return Math.round(ult.reduce((s, m) => s + pm[m], 0) / ult.length);
+}
+
+function renderSacosInventario() {
+  const cont = $("sacosInventario");
+  if (!cont) return;
+  const productos = (state.sacoProductos || []).filter(p => p.activo !== false);
+  const al = $("sacosAlerta");
+  if (!productos.length) {
+    cont.innerHTML = '<div class="text-xs text-gray-400">Configurá sacos en ⚙️ Configuración.</div>';
+    if (al) al.classList.add("hidden");
+    return;
+  }
+  const promDiario = _consumoPromDiario(30);
+  const alertas = [];
+  let totalStock = 0;
+  const filas = productos.map(p => {
+    const stock = _stockActual(p);
+    if (stock != null) totalStock += stock;
+    const label = p.label || (p.nombre + " " + p.kg + "kg");
+    const min = Number(p.stock_min) || 0;
+    const bajo = stock != null && min > 0 && stock <= min;
+    if (bajo) alertas.push(label + " (" + stock + ")");
+    const stockTxt = stock == null
+      ? '<span class="text-gray-400">sin ajustar</span>'
+      : '<b class="' + (bajo ? 'text-rose-700' : 'text-gray-800') + '">' + stock + '</b><span class="text-gray-400 text-xs"> sacos</span>';
+    return '<div class="flex items-center justify-between border-b border-gray-100 py-1">' +
+      '<span class="flex items-center gap-2"><span class="inline-block w-3 h-3 rounded-full" style="background:' + (p.color || '#9ca3af') + '"></span>' + escapeHtml(label) + '</span>' +
+      '<span class="text-sm">' + stockTxt + '</span></div>';
+  }).join("");
+  const dias = promDiario > 0 ? Math.floor(totalStock / promDiario) : null;
+  cont.innerHTML = filas +
+    '<div class="flex items-center justify-between mt-2 pt-1 border-t-2 border-amber-300 text-sm">' +
+      '<span class="font-bold text-amber-900">Total en stock</span><span class="mono font-bold">' + totalStock + ' sacos</span></div>' +
+    (dias != null ? '<div class="text-xs text-gray-600 mt-1">⏳ Alcanza para ~<b>' + dias + ' día' + (dias === 1 ? '' : 's') + '</b> al ritmo actual (' + promDiario.toFixed(1) + ' sacos/día)</div>' : '');
+  if (al) {
+    if (alertas.length) { al.classList.remove("hidden"); al.innerHTML = "⚠️ Stock bajo: " + alertas.map(escapeHtml).join(" · "); }
+    else al.classList.add("hidden");
+  }
+}
+
+let _sacoCharts = {};
+function _mkSacoChart(id, cfg) {
+  const el = $(id); if (!el || typeof Chart === "undefined") return;
+  if (_sacoCharts[id]) _sacoCharts[id].destroy();
+  _sacoCharts[id] = new Chart(el.getContext("2d"), cfg);
+}
+function renderSacosAnalitica() {
+  // 1) Uso diario últimos 30 días
+  const dias = [];
+  for (let i = 29; i >= 0; i--) dias.push(daysAgo(i));
+  const porDia = {};
+  (state.sacoConsumo || []).forEach(c => { porDia[c.fecha] = (porDia[c.fecha] || 0) + (parseInt(c.cantidad) || 0); });
+  _mkSacoChart("chartSacoDiario", {
+    type: "bar",
+    data: { labels: dias.map(d => d.slice(5)), datasets: [{ label: "Sacos/día", data: dias.map(d => porDia[d] || 0), backgroundColor: "#f59e0b" }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  });
+  // 2) Uso mensual (últimos 6)
+  const pm = _consumoPorMes();
+  const meses = Object.keys(pm).sort().slice(-6);
+  _mkSacoChart("chartSacoMensual", {
+    type: "bar",
+    data: { labels: meses, datasets: [{ label: "Sacos/mes", data: meses.map(m => pm[m]), backgroundColor: "#0891b2" }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  });
+  // 3) Por tipo
+  const porTipo = {};
+  (state.sacoConsumo || []).forEach(c => { porTipo[c.tipo] = (porTipo[c.tipo] || 0) + (parseInt(c.cantidad) || 0); });
+  const tipos = Object.keys(porTipo);
+  const colorTipo = (t) => { const p = (state.sacoProductos || []).find(x => x.nombre === t); return p ? p.color : "#9ca3af"; };
+  _mkSacoChart("chartSacoTipo", {
+    type: "doughnut",
+    data: { labels: tipos, datasets: [{ data: tipos.map(t => porTipo[t]), backgroundColor: tipos.map(colorTipo) }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "bottom" } } }
+  });
+  // Pronóstico
+  const pron = _pronosticoProxMes(3);
+  const pe = $("sacosPronostico");
+  if (pe) pe.textContent = pron > 0 ? ("📈 Pronóstico próximo mes: ~" + pron + " sacos (promedio de meses anteriores)") : "Pronóstico: faltan meses de historial.";
+  // Costo del período (rango del dashboard)
+  const costo = {};
+  (state.sacoCompras || []).filter(c => c.fecha >= state.rango.desde && c.fecha <= state.rango.hasta && c.costo != null)
+    .forEach(c => { costo[c.moeda] = (costo[c.moeda] || 0) + Number(c.costo); });
+  const ce = $("sacosCosto");
+  if (ce) {
+    const partes = Object.keys(costo).map(m => fmtMoeda(costo[m], m));
+    ce.textContent = partes.length ? ("💵 Gastado en trigo (período): " + partes.join(" · ")) : "Sin compras con costo en el período.";
+  }
+}
+
+// ---- Modales: ajustar existencia / registrar compra ----
+function openAjusteStock() {
+  const cont = $("ajusteStockList");
+  cont.innerHTML = (state.sacoProductos || []).map(p => {
+    const label = p.label || (p.nombre + " " + p.kg + "kg");
+    const stock = _stockActual(p);
+    return '<div class="flex items-center gap-2 text-sm">' +
+      '<span class="flex-1">' + escapeHtml(label) + (stock != null ? ' <span class="text-gray-400">(hoy ' + stock + ')</span>' : '') + '</span>' +
+      '<input type="number" min="0" step="1" class="ajuste-stock w-20 p-1.5 border-2 border-gray-300 rounded text-center" data-id="' + p.id + '" placeholder="stock" value="' + (p.stock_base != null ? p.stock_base : '') + '"/>' +
+      '<input type="number" min="0" step="1" class="ajuste-min w-16 p-1.5 border-2 border-gray-200 rounded text-center" data-id="' + p.id + '" placeholder="mín" value="' + (p.stock_min != null ? p.stock_min : '') + '"/>' +
+      '</div>';
+  }).join("");
+  openModal("modalAjusteStock");
+}
+async function guardarAjusteStock() {
+  const hoy = todayISO();
+  const ups = [];
+  document.querySelectorAll(".ajuste-stock").forEach(inp => {
+    const id = inp.dataset.id;
+    const val = inp.value.trim();
+    const minInp = document.querySelector('.ajuste-min[data-id="' + CSS.escape(id) + '"]');
+    const patch = {};
+    if (val !== "") { patch.stock_base = Number(val); patch.stock_fecha = hoy; }
+    if (minInp && minInp.value.trim() !== "") patch.stock_min = Number(minInp.value);
+    if (Object.keys(patch).length) ups.push({ id, patch });
+  });
+  for (const u of ups) await sb.from("saco_producto").update(u.patch).eq("id", u.id);
+  closeModal("modalAjusteStock");
+  toast("Existencia actualizada");
+  reload();
+}
+function openCompra() {
+  const sel = $("compraProducto");
+  sel.innerHTML = (state.sacoProductos || []).map(p => '<option value="' + p.nombre + '|' + p.kg + '">' + escapeHtml(p.label || (p.nombre + " " + p.kg + "kg")) + '</option>').join("");
+  $("compraFecha").value = todayISO();
+  $("compraCantidad").value = "";
+  $("compraCosto").value = "";
+  openModal("modalCompra");
+}
+async function guardarCompra() {
+  const parts = ($("compraProducto").value || "").split("|");
+  const nombre = parts[0], kg = Number(parts[1]);
+  const cantidad = parseInt($("compraCantidad").value) || 0;
+  if (!nombre || cantidad <= 0) { toast("Elegí el saco y la cantidad"); return; }
+  const costo = $("compraCosto").value.trim() !== "" ? Number($("compraCosto").value) : null;
+  const moeda = $("compraMoeda").value || "R$";
+  const fecha = $("compraFecha").value || todayISO();
+  const { error } = await sb.from("saco_compra").insert({ nombre, kg, cantidad, costo, moeda, fecha });
+  if (error) { toast("Error: " + error.message, 4000); return; }
+  closeModal("modalCompra");
+  toast("Compra registrada");
+  reload();
+}
+function wireSacosInventarioListeners() {
+  if ($("btnAjusteStock")) $("btnAjusteStock").addEventListener("click", openAjusteStock);
+  if ($("btnRegistrarCompra")) $("btnRegistrarCompra").addEventListener("click", openCompra);
+  if ($("ajusteStockGuardar")) $("ajusteStockGuardar").addEventListener("click", guardarAjusteStock);
+  if ($("compraGuardar")) $("compraGuardar").addEventListener("click", guardarCompra);
+}
+
 function init() {
   // Rango default: últimos 30 días
   setRango(daysAgo(30), todayISO());
@@ -842,6 +1040,7 @@ function init() {
   wireCodigoListeners();
   // Wire de la gestión de catálogo de sacos (administrativo)
   wireSacosListeners();
+  wireSacosInventarioListeners();
 }
 
 // ============================================================
