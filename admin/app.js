@@ -22,6 +22,7 @@ const state = {
   canales: [],         // catálogo de canales de saldo (etiqueta/visibilidad)
   sacoCompras: [],     // compras/recepciones de sacos
   sacoConsumo: [],     // consumo histórico (vista saco_consumo_diario)
+  formasPago: [],      // catálogo de formas de pago de la caja
 };
 
 // Map clave de canal -> ids de su tarjeta en el HTML
@@ -571,6 +572,7 @@ async function reload({ preserveExpanded = true } = {}) {
       fetchCanales(),
       fetchSacoCompras(),
       fetchSacoConsumo(),
+      fetchFormasPago(),
     ]);
     state.cierres = cierres;
     state.cajaSaldos = cajaSaldos;
@@ -590,6 +592,7 @@ async function reload({ preserveExpanded = true } = {}) {
     renderSacosAnalitica();
     renderSacosAdmin();
     renderCanalesAdmin();
+    renderFormasPagoAdmin();
     renderCajaSaldos();
     renderCajaRetiros();
     renderCajaEvolucion();
@@ -1005,6 +1008,70 @@ function wireSacosInventarioListeners() {
   });
 }
 
+// ============================================================
+// 💳 Formas de pago de la caja: renombrar / mostrar-ocultar / agregar
+// ============================================================
+const FP_COLUMNAS = ["PIX","Dinheiro","Débito POS","Pago Móvil","Bs efectivo","USD"]; // llaves base (no se borran)
+async function fetchFormasPago() {
+  const { data } = await sb.from("forma_pago_catalogo").select("*").order("orden");
+  state.formasPago = data || [];
+}
+function renderFormasPagoAdmin() {
+  const cont = $("formasPagoAdmin");
+  if (!cont) return;
+  cont.innerHTML = (state.formasPago || []).map(f => {
+    const activo = f.activo !== false;
+    const esBase = FP_COLUMNAS.indexOf(f.nombre) >= 0;
+    return '<div class="flex items-center gap-1 text-sm">' +
+      '<input type="text" class="fp-label flex-1 p-1.5 border-2 border-gray-300 rounded text-sm" data-id="' + f.id + '" value="' + escapeHtml(f.label || f.nombre) + '"/>' +
+      '<span class="text-[10px] text-gray-400 w-8 text-center">' + escapeHtml(f.moeda) + '</span>' +
+      '<button type="button" data-id="' + f.id + '" data-activo="' + activo + '" class="fp-toggle text-[11px] px-1.5 py-0.5 rounded ' + (activo ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500') + '">' + (activo ? 'visible' : 'oculto') + '</button>' +
+      '<button type="button" data-id="' + f.id + '" class="fp-save text-[11px] px-2 py-0.5 rounded bg-amber-600 text-white font-bold">💾</button>' +
+      (esBase ? '<span class="text-[10px] text-gray-300 px-1" title="forma base, no se borra">🔒</span>' : '<button type="button" data-id="' + f.id + '" class="fp-del text-rose-600 px-1">🗑</button>') +
+      '</div>';
+  }).join("") || '<div class="text-[11px] text-gray-400">Sin formas de pago.</div>';
+  wireFormasPagoRows();
+}
+function wireFormasPagoRows() {
+  document.querySelectorAll(".fp-save").forEach(b => b.onclick = async () => {
+    const id = b.dataset.id;
+    const inp = document.querySelector('.fp-label[data-id="' + CSS.escape(id) + '"]');
+    const nuevo = (inp.value || "").trim();
+    if (!nuevo) { toast("El nombre no puede quedar vacío"); return; }
+    const { error } = await sb.from("forma_pago_catalogo").update({ label: nuevo }).eq("id", id);
+    if (error) { toast("Error: " + error.message, 4000); return; }
+    await fetchFormasPago(); renderFormasPagoAdmin();
+    toast("Nombre actualizado (se ve en la caja)");
+  });
+  document.querySelectorAll(".fp-toggle").forEach(b => b.onclick = async () => {
+    const nuevoActivo = !(b.dataset.activo === "true");
+    await sb.from("forma_pago_catalogo").update({ activo: nuevoActivo }).eq("id", b.dataset.id);
+    await fetchFormasPago(); renderFormasPagoAdmin();
+    toast(nuevoActivo ? "Visible en la caja" : "Oculta en la caja");
+  });
+  document.querySelectorAll(".fp-del").forEach(b => b.onclick = async () => {
+    if (!confirm("¿Borrar esta forma de pago? (los cierres ya guardados conservan su dato)")) return;
+    await sb.from("forma_pago_catalogo").delete().eq("id", b.dataset.id);
+    await fetchFormasPago(); renderFormasPagoAdmin();
+    toast("Forma de pago borrada");
+  });
+}
+function wireFormasPagoListeners() {
+  const add = $("addFpBtn");
+  if (add) add.addEventListener("click", async () => {
+    const nombre = ($("nuevaFpNombre").value || "").trim();
+    const moeda = $("nuevaFpMoeda").value || "R$";
+    if (!nombre) { toast("Poné un nombre"); return; }
+    if (FP_COLUMNAS.indexOf(nombre) >= 0) { toast("Ese nombre es reservado, usá otro"); return; }
+    const orden = (state.formasPago.length || 0) + 1;
+    const { error } = await sb.from("forma_pago_catalogo").insert({ nombre, label: nombre, moeda, preset: false, activo: true, orden });
+    if (error) { toast(error.message.includes("duplicate") ? "Esa forma ya existe" : "Error: " + error.message, 4000); return; }
+    $("nuevaFpNombre").value = "";
+    await fetchFormasPago(); renderFormasPagoAdmin();
+    toast("Forma de pago agregada (aparece en la caja)");
+  });
+}
+
 function init() {
   // Rango default: últimos 30 días
   setRango(daysAgo(30), todayISO());
@@ -1073,6 +1140,7 @@ function init() {
   // Wire de la gestión de catálogo de sacos (administrativo)
   wireSacosListeners();
   wireSacosInventarioListeners();
+  wireFormasPagoListeners();
 }
 
 // ============================================================
@@ -2052,6 +2120,6 @@ function wireCajaListeners() {
 // Arranque
 // ============================================================
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const ADMIN_BUILD = "2026-05-31 · a19";
+const ADMIN_BUILD = "2026-05-31 · a20";
 (function(){ const e = document.getElementById("adminVersion"); if (e) e.textContent = "📊 Admin · v" + ADMIN_BUILD; })();
 setupPinGate();

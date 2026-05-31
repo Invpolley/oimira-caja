@@ -83,12 +83,12 @@ const SACO_PRODUCTOS_FALLBACK = [
 // usar estos 6 presets para que la UI nunca se quede sin inputs.
 // Sincronizado con forma_pago_catalogo en BD (ver references/schema.md).
 const INGRESOS_CATALOG_FALLBACK = [
-  { nombre: "PIX",          moeda: "R$",  preset: true, orden: 1 },
-  { nombre: "Dinheiro",     moeda: "R$",  preset: true, orden: 2 },
-  { nombre: "Débito POS",   moeda: "R$",  preset: true, orden: 3 },
-  { nombre: "Pago Móvil",   moeda: "Bs",  preset: true, orden: 4 },
-  { nombre: "Bs efectivo",  moeda: "Bs",  preset: true, orden: 5 },
-  { nombre: "USD",          moeda: "USD", preset: true, orden: 6 },
+  { nombre: "PIX",          moeda: "R$",  preset: true, orden: 1, label: "PIX" },
+  { nombre: "Dinheiro",     moeda: "R$",  preset: true, orden: 2, label: "Total venta efectivo" },
+  { nombre: "Débito POS",   moeda: "R$",  preset: true, orden: 3, label: "Débito POS" },
+  { nombre: "Pago Móvil",   moeda: "Bs",  preset: true, orden: 4, label: "Pago Móvil" },
+  { nombre: "Bs efectivo",  moeda: "Bs",  preset: true, orden: 5, label: "Bs efectivo" },
+  { nombre: "USD",          moeda: "USD", preset: true, orden: 6, label: "USD" },
 ];
 
 // ============================================================================
@@ -185,7 +185,7 @@ function renderIngresos() {
     const row = document.createElement("div");
     row.className = "ingreso-row";
     row.innerHTML = `
-      <span class="label">${escapeHtml(displayIngresoName(ing.nombre))}</span>
+      <span class="label">${escapeHtml(ing.label || displayIngresoName(ing.nombre))}</span>
       <span class="moeda">${ing.moeda}</span>
       <input type="number" inputmode="decimal" step="0.01" min="0"
              value="${ing.monto}" data-idx="${idx}" data-field="monto" />
@@ -514,13 +514,11 @@ function ensureIngresosPresets() {
     ? ingresosCatalog
     : INGRESOS_CATALOG_FALLBACK;
 
-  const existingPresets = new Set(
-    state.ingresos.filter(i => i.preset).map(i => i.nombre)
-  );
+  const existing = new Set(state.ingresos.map(i => i.nombre));
   const missing = source
-    .filter(fp => fp.preset && !existingPresets.has(fp.nombre))
+    .filter(fp => !existing.has(fp.nombre))
     .map(fp => ({
-      nombre: fp.nombre, moeda: fp.moeda, monto: 0, preset: fp.preset,
+      nombre: fp.nombre, moeda: fp.moeda, label: fp.label, monto: 0, preset: fp.preset,
     }));
   if (missing.length > 0) {
     // Agregar los faltantes al principio para que aparezcan en orden
@@ -548,28 +546,30 @@ async function loadExistingCierre() {
   state.tasaBsRs  = data.tasa_bs_rs  != null ? Number(data.tasa_bs_rs)  : TASA_BS_DEFAULT;
   state.tasaUsdRs = data.tasa_usd_rs != null ? Number(data.tasa_usd_rs) : TASA_USD_DEFAULT;
 
-  // Rellenar ingresos preset
+  // Rellenar ingresos: presets -> columnas fijas; no-preset (agregadas en admin) -> forma_pago_extra
+  const fieldMap = {
+    'PIX': 'pix_rs', 'Débito POS': 'debito_rs',
+    'Pago Móvil': 'pago_movil_bs', 'Bs efectivo': 'bs_efectivo_bs',
+    'USD': 'usd_usd'
+  };
+  const extras = data.forma_pago_extra || [];
   state.ingresos = ingresosCatalog.map(fp => {
-    const fieldMap = {
-      'PIX': 'pix_rs', 'Débito POS': 'debito_rs',
-      'Pago Móvil': 'pago_movil_bs', 'Bs efectivo': 'bs_efectivo_bs',
-      'USD': 'usd_usd'
-    };
-    let monto = 0;
-    if (fp.nombre === "Dinheiro") {
-      // "Dinheiro" en UI = venta efectivo BRUTA.
-      // Lee ventas_efectivo_rs (campo nuevo); legacy fallback a dinheiro_rs si vacío/0.
+    let monto = 0, id;
+    if (fp.preset && fp.nombre === "Dinheiro") {
       const ve = Number(data.ventas_efectivo_rs || 0);
       monto = ve > 0 ? ve : Number(data.dinheiro_rs || 0);
+    } else if (fp.preset && fieldMap[fp.nombre]) {
+      monto = data[fieldMap[fp.nombre]] || 0;
     } else {
-      const field = fieldMap[fp.nombre];
-      monto = field ? (data[field] || 0) : 0;
+      const ext = extras.find(e => e.nombre === fp.nombre); // forma agregada en admin
+      if (ext) { monto = ext.monto || 0; id = ext.id; }
     }
-    return { nombre: fp.nombre, moeda: fp.moeda, monto, preset: fp.preset };
+    return { nombre: fp.nombre, moeda: fp.moeda, label: fp.label, monto, preset: fp.preset, id };
   });
 
-  // Agregar formas de pago extra
-  (data.forma_pago_extra || []).forEach(fpe => {
+  // Formas de pago extra que NO están en el catálogo (ad-hoc/legacy)
+  const catNames = new Set(ingresosCatalog.map(c => c.nombre));
+  extras.filter(e => !catNames.has(e.nombre)).forEach(fpe => {
     state.ingresos.push({
       nombre: fpe.nombre, moeda: fpe.moeda, monto: fpe.monto || 0,
       preset: false, id: fpe.id
@@ -1212,7 +1212,7 @@ window.addEventListener("appinstalled", () => {
 })();
 
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const APP_BUILD = "2026-05-31 · c14";
+const APP_BUILD = "2026-05-31 · c15";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
 
 // Registrar Service Worker
