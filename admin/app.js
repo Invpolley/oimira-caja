@@ -794,8 +794,10 @@ async function fetchSacoConsumo() {
 }
 
 function _stockActual(prod) {
-  if (!prod.stock_fecha) return null; // sin ajustar todavía
-  const F = prod.stock_fecha;
+  // El stock_base es el conteo físico a esa fecha (verdad absoluta, ya incluye lo de ese día).
+  // Solo los movimientos POSTERIORES (fecha > stock_fecha) ajustan: compras suman, consumo resta.
+  // Sin ajuste (stock_fecha null) => cuenta todo el historial desde el inicio.
+  const F = prod.stock_fecha || "0000-01-01";
   const cons = (state.sacoConsumo || [])
     .filter(c => c.tipo === prod.nombre && Number(c.kg) === Number(prod.kg) && c.fecha > F)
     .reduce((s, c) => s + (parseInt(c.cantidad) || 0), 0);
@@ -804,6 +806,15 @@ function _stockActual(prod) {
     .reduce((s, c) => s + (parseInt(c.cantidad) || 0), 0);
   return (Number(prod.stock_base) || 0) - cons + comp;
 }
+// Precio/moneda actual = de la compra más reciente con precio cargado
+function _ultimaCompra(prod) {
+  const cs = (state.sacoCompras || [])
+    .filter(c => c.nombre === prod.nombre && Number(c.kg) === Number(prod.kg) && c.precio_unit != null)
+    .sort((a, b) => (a.fecha < b.fecha ? 1 : (a.fecha > b.fecha ? -1 : 0)));
+  return cs.length ? cs[0] : null;
+}
+function _precioActual(prod) { const c = _ultimaCompra(prod); return c ? Number(c.precio_unit) : null; }
+function _monedaActual(prod) { const c = _ultimaCompra(prod); return c ? c.moeda : "R$"; }
 function _consumoPromDiario(ventana) {
   ventana = ventana || 30;
   const desde = daysAgo(ventana);
@@ -831,34 +842,43 @@ function renderSacosInventario() {
   const productos = (state.sacoProductos || []).filter(p => p.activo !== false);
   const al = $("sacosAlerta");
   if (!productos.length) {
-    cont.innerHTML = '<div class="text-xs text-gray-400">Configurá sacos en ⚙️ Configuración.</div>';
+    cont.innerHTML = '<div class="text-xs text-gray-400">Configurá sacos en \u2699\ufe0f Configuración.</div>';
     if (al) al.classList.add("hidden");
     return;
   }
   const promDiario = _consumoPromDiario(30);
   const alertas = [];
   let totalStock = 0;
+  const valorTotal = {};
   const filas = productos.map(p => {
     const stock = _stockActual(p);
-    if (stock != null) totalStock += stock;
+    totalStock += stock;
     const label = p.label || (p.nombre + " " + p.kg + "kg");
     const min = Number(p.stock_min) || 0;
-    const bajo = stock != null && min > 0 && stock <= min;
+    const bajo = min > 0 && stock <= min;
     if (bajo) alertas.push(label + " (" + stock + ")");
-    const stockTxt = stock == null
-      ? '<span class="text-gray-400">sin ajustar</span>'
-      : '<b class="' + (bajo ? 'text-rose-700' : 'text-gray-800') + '">' + stock + '</b><span class="text-gray-400 text-xs"> sacos</span>';
+    const precio = _precioActual(p);
+    let valTxt = "";
+    if (precio != null && stock > 0) {
+      const m = _monedaActual(p) || "R$";
+      const val = stock * precio;
+      valorTotal[m] = (valorTotal[m] || 0) + val;
+      valTxt = ' \u00b7 <span class="text-gray-500">' + fmtMoeda(val, m) + '</span>';
+    }
+    const stockTxt = '<b class="' + (bajo ? 'text-rose-700' : 'text-gray-800') + '">' + stock + '</b><span class="text-gray-400 text-xs"> sacos</span>' + valTxt;
     return '<div class="flex items-center justify-between border-b border-gray-100 py-1">' +
       '<span class="flex items-center gap-2"><span class="inline-block w-3 h-3 rounded-full" style="background:' + (p.color || '#9ca3af') + '"></span>' + escapeHtml(label) + '</span>' +
       '<span class="text-sm">' + stockTxt + '</span></div>';
   }).join("");
   const dias = promDiario > 0 ? Math.floor(totalStock / promDiario) : null;
+  const valorParts = Object.keys(valorTotal).map(m => fmtMoeda(valorTotal[m], m));
   cont.innerHTML = filas +
     '<div class="flex items-center justify-between mt-2 pt-1 border-t-2 border-amber-300 text-sm">' +
       '<span class="font-bold text-amber-900">Total en stock</span><span class="mono font-bold">' + totalStock + ' sacos</span></div>' +
-    (dias != null ? '<div class="text-xs text-gray-600 mt-1">⏳ Alcanza para ~<b>' + dias + ' día' + (dias === 1 ? '' : 's') + '</b> al ritmo actual (' + promDiario.toFixed(1) + ' sacos/día)</div>' : '');
+    (valorParts.length ? '<div class="flex items-center justify-between text-xs text-gray-700 mt-1"><span class="font-semibold">\ud83d\udcb5 Valor del inventario</span><span class="mono font-semibold">' + valorParts.join(" \u00b7 ") + '</span></div>' : '') +
+    (dias != null ? '<div class="text-xs text-gray-600 mt-1">\u23f3 Alcanza para ~<b>' + dias + ' día' + (dias === 1 ? '' : 's') + '</b> al ritmo actual (' + promDiario.toFixed(1) + ' sacos/día)</div>' : '');
   if (al) {
-    if (alertas.length) { al.classList.remove("hidden"); al.innerHTML = "⚠️ Stock bajo: " + alertas.map(escapeHtml).join(" · "); }
+    if (alertas.length) { al.classList.remove("hidden"); al.innerHTML = "\u26a0\ufe0f Stock bajo: " + alertas.map(escapeHtml).join(" \u00b7 "); }
     else al.classList.add("hidden");
   }
 }
@@ -957,10 +977,11 @@ async function guardarCompra() {
   const nombre = parts[0], kg = Number(parts[1]);
   const cantidad = parseInt($("compraCantidad").value) || 0;
   if (!nombre || cantidad <= 0) { toast("Elegí el saco y la cantidad"); return; }
-  const costo = $("compraCosto").value.trim() !== "" ? Number($("compraCosto").value) : null;
+  const precio = $("compraCosto").value.trim() !== "" ? Number($("compraCosto").value) : null; // precio POR SACO
+  const costo = precio != null ? precio * cantidad : null;                                       // total = precio × cantidad
   const moeda = $("compraMoeda").value || "R$";
   const fecha = $("compraFecha").value || todayISO();
-  const { error } = await sb.from("saco_compra").insert({ nombre, kg, cantidad, costo, moeda, fecha });
+  const { error } = await sb.from("saco_compra").insert({ nombre, kg, cantidad, precio_unit: precio, costo, moeda, fecha });
   if (error) { toast("Error: " + error.message, 4000); return; }
   closeModal("modalCompra");
   toast("Compra registrada");
@@ -971,6 +992,17 @@ function wireSacosInventarioListeners() {
   if ($("btnRegistrarCompra")) $("btnRegistrarCompra").addEventListener("click", openCompra);
   if ($("ajusteStockGuardar")) $("ajusteStockGuardar").addEventListener("click", guardarAjusteStock);
   if ($("compraGuardar")) $("compraGuardar").addEventListener("click", guardarCompra);
+  // Vista previa del total de la compra (precio por saco × cantidad)
+  const _updTotal = () => {
+    const cant = parseInt(($("compraCantidad") || {}).value) || 0;
+    const pre = Number(($("compraCosto") || {}).value) || 0;
+    const m = ($("compraMoeda") || {}).value || "R$";
+    const el = $("compraTotalPreview");
+    if (el) el.textContent = (cant > 0 && pre > 0) ? ("Total: " + fmtMoeda(cant * pre, m) + "  (" + cant + " × " + pre + ")") : "";
+  };
+  ["compraCantidad", "compraCosto", "compraMoeda"].forEach(id => {
+    const e = $(id); if (e) { e.addEventListener("input", _updTotal); e.addEventListener("change", _updTotal); }
+  });
 }
 
 function init() {
@@ -2020,6 +2052,6 @@ function wireCajaListeners() {
 // Arranque
 // ============================================================
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const ADMIN_BUILD = "2026-05-31 · a16";
+const ADMIN_BUILD = "2026-05-31 · a19";
 (function(){ const e = document.getElementById("adminVersion"); if (e) e.textContent = "📊 Admin · v" + ADMIN_BUILD; })();
 setupPinGate();
