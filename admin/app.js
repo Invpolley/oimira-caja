@@ -2019,4 +2019,7 @@ function wireCajaListeners() {
 // ============================================================
 // Arranque
 // ============================================================
+// Sello de versión (para confirmar qué build está cargado en el dispositivo)
+const ADMIN_BUILD = "2026-05-31 · a16";
+(function(){ const e = document.getElementById("adminVersion"); if (e) e.textContent = "📊 Admin · v" + ADMIN_BUILD; })();
 setupPinGate();

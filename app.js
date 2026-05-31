@@ -1211,6 +1211,10 @@ window.addEventListener("appinstalled", () => {
   refreshInstallBanner();
 })();
 
+// Sello de versión (para confirmar qué build está cargado en el dispositivo)
+const APP_BUILD = "2026-05-31 · c14";
+(function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
+
 // Registrar Service Worker
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").catch(err => console.warn("SW fail:", err));
