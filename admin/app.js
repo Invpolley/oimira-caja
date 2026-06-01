@@ -818,12 +818,15 @@ function _ultimaCompra(prod) {
 }
 function _precioActual(prod) { const c = _ultimaCompra(prod); return c ? Number(c.precio_unit) : null; }
 function _monedaActual(prod) { const c = _ultimaCompra(prod); return c ? c.moeda : "R$"; }
-function _consumoPromDiario(ventana) {
+function _consumoStats(ventana) {
   ventana = ventana || 30;
   const desde = daysAgo(ventana);
-  const total = (state.sacoConsumo || []).filter(c => c.fecha > desde).reduce((s, c) => s + (parseInt(c.cantidad) || 0), 0);
-  return total / ventana;
+  const enVentana = (state.sacoConsumo || []).filter(c => c.fecha > desde);
+  const total = enVentana.reduce((s, c) => s + (parseInt(c.cantidad) || 0), 0);
+  const dias = new Set(enVentana.map(c => c.fecha)).size; // días distintos CON consumo registrado
+  return { total, dias, prom: dias > 0 ? total / dias : 0 }; // promedio por día con registro
 }
+function _consumoPromDiario(ventana) { return _consumoStats(ventana).prom; }
 function _consumoPorMes() {
   const m = {};
   (state.sacoConsumo || []).forEach(c => { const k = c.fecha.slice(0, 7); m[k] = (m[k] || 0) + (parseInt(c.cantidad) || 0); });
@@ -849,7 +852,8 @@ function renderSacosInventario() {
     if (al) al.classList.add("hidden");
     return;
   }
-  const promDiario = _consumoPromDiario(30);
+  const stats = _consumoStats(30);
+  const promDiario = stats.prom;
   const alertas = [];
   let totalStock = 0;
   const valorTotal = {};
@@ -873,13 +877,19 @@ function renderSacosInventario() {
       '<span class="flex items-center gap-2"><span class="inline-block w-3 h-3 rounded-full" style="background:' + (p.color || '#9ca3af') + '"></span>' + escapeHtml(label) + '</span>' +
       '<span class="text-sm">' + stockTxt + '</span></div>';
   }).join("");
-  const dias = promDiario > 0 ? Math.floor(totalStock / promDiario) : null;
+  let autonomiaHtml = '';
+  if (stats.dias < 3) {
+    autonomiaHtml = '<div class="text-xs text-gray-500 mt-1">⏳ Autonomía: cargá unos días más de consumo para estimar (' + stats.dias + ' día' + (stats.dias === 1 ? '' : 's') + ' con registro).</div>';
+  } else if (promDiario > 0) {
+    const dias = Math.round(totalStock / promDiario);
+    autonomiaHtml = '<div class="text-xs text-gray-600 mt-1">⏳ Alcanza para ~<b>' + dias + ' días</b> · promedio <b>' + promDiario.toFixed(1) + '</b> sacos/día (según ' + stats.dias + ' días con registro)</div>';
+  }
   const valorParts = Object.keys(valorTotal).map(m => fmtMoeda(valorTotal[m], m));
   cont.innerHTML = filas +
     '<div class="flex items-center justify-between mt-2 pt-1 border-t-2 border-amber-300 text-sm">' +
       '<span class="font-bold text-amber-900">Total en stock</span><span class="mono font-bold">' + totalStock + ' sacos</span></div>' +
     (valorParts.length ? '<div class="flex items-center justify-between text-xs text-gray-700 mt-1"><span class="font-semibold">\ud83d\udcb5 Valor del inventario</span><span class="mono font-semibold">' + valorParts.join(" \u00b7 ") + '</span></div>' : '') +
-    (dias != null ? '<div class="text-xs text-gray-600 mt-1">\u23f3 Alcanza para ~<b>' + dias + ' día' + (dias === 1 ? '' : 's') + '</b> al ritmo actual (' + promDiario.toFixed(1) + ' sacos/día)</div>' : '');
+    autonomiaHtml;
   if (al) {
     if (alertas.length) { al.classList.remove("hidden"); al.innerHTML = "\u26a0\ufe0f Stock bajo: " + alertas.map(escapeHtml).join(" \u00b7 "); }
     else al.classList.add("hidden");
@@ -2120,6 +2130,6 @@ function wireCajaListeners() {
 // Arranque
 // ============================================================
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const ADMIN_BUILD = "2026-05-31 · a20";
+const ADMIN_BUILD = "2026-06-01 · a21";
 (function(){ const e = document.getElementById("adminVersion"); if (e) e.textContent = "📊 Admin · v" + ADMIN_BUILD; })();
 setupPinGate();
