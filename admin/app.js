@@ -573,6 +573,7 @@ async function reload({ preserveExpanded = true } = {}) {
       fetchSacoCompras(),
       fetchSacoConsumo(),
       fetchFormasPago(),
+      fetchCajeras(),
     ]);
     state.cierres = cierres;
     state.cajaSaldos = cajaSaldos;
@@ -593,6 +594,7 @@ async function reload({ preserveExpanded = true } = {}) {
     renderSacosAdmin();
     renderCanalesAdmin();
     renderFormasPagoAdmin();
+    renderCajerasAdmin();
     renderCajaSaldos();
     renderCajaRetiros();
     renderCajaEvolucion();
@@ -1066,6 +1068,104 @@ function wireFormasPagoRows() {
     toast("Forma de pago borrada");
   });
 }
+// ============================================================
+// 👥 Cajeras / colaboradores: renombrar / mostrar-ocultar / agregar / borrar
+// ============================================================
+async function fetchCajeras() {
+  const { data } = await sb.from("cajera").select("*").order("orden");
+  state.cajeras = data || [];
+}
+
+async function cuentaCierresPorCajera(nombre) {
+  // Cuántos cierres en dia_cierre tiene este nombre (para decidir si mostrar 🔒)
+  const { count } = await sb
+    .from("dia_cierre")
+    .select("id", { count: "exact", head: true })
+    .eq("cajera", nombre);
+  return count || 0;
+}
+
+async function renderCajerasAdmin() {
+  const cont = $("cajerasAdmin");
+  if (!cont) return;
+  const lista = (state.cajeras || []);
+  if (lista.length === 0) {
+    cont.innerHTML = '<div class="text-[11px] text-gray-400">Sin cajeras. Agregá una abajo.</div>';
+    return;
+  }
+  // Para cada cajera, traer su count de cierres en paralelo (solo para mostrar 🔒)
+  const counts = await Promise.all(lista.map(c => cuentaCierresPorCajera(c.nombre)));
+  cont.innerHTML = lista.map((c, i) => {
+    const activo = c.activo !== false;
+    const tieneHistorico = counts[i] > 0;
+    return '<div class="flex items-center gap-1 text-sm">' +
+      '<input type="text" class="cajera-nombre flex-1 p-1.5 border-2 border-gray-300 rounded text-sm" data-id="' + c.id + '" data-original="' + escapeHtml(c.nombre) + '" value="' + escapeHtml(c.nombre) + '"/>' +
+      '<button type="button" data-id="' + c.id + '" data-activo="' + activo + '" class="cajera-toggle text-[11px] px-1.5 py-0.5 rounded ' + (activo ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500') + '">' + (activo ? 'visible' : 'oculto') + '</button>' +
+      '<button type="button" data-id="' + c.id + '" class="cajera-save text-[11px] px-2 py-0.5 rounded bg-amber-600 text-white font-bold">💾</button>' +
+      (tieneHistorico
+        ? '<span class="text-[10px] text-gray-300 px-1" title="tiene ' + counts[i] + ' cierre(s) histórico(s) — no se borra">🔒</span>'
+        : '<button type="button" data-id="' + c.id + '" class="cajera-del text-rose-600 px-1" title="Borrar">🗑</button>') +
+      '</div>';
+  }).join("");
+  wireCajerasRows();
+}
+
+function wireCajerasRows() {
+  // Guardar nombre (renombrar)
+  document.querySelectorAll(".cajera-save").forEach(b => b.onclick = async () => {
+    const id = b.dataset.id;
+    const inp = document.querySelector('.cajera-nombre[data-id="' + CSS.escape(id) + '"]');
+    const nuevo = (inp.value || "").trim();
+    const original = inp.dataset.original;
+    if (!nuevo) { toast("El nombre no puede quedar vacío"); return; }
+    if (nuevo === original) { toast("Sin cambios"); return; }
+    // Si la cajera tiene cierres históricos, avisar que no se cambia retroactivamente
+    const histor = await cuentaCierresPorCajera(original);
+    if (histor > 0 && !confirm(`"${original}" tiene ${histor} cierre(s) histórico(s) con su nombre actual.\n\nSi renombrás, los cierres viejos siguen mostrando "${original}" — solo cambia el nombre para los próximos.\n\n¿Continuar?`)) return;
+    const { error } = await sb.from("cajera").update({ nombre: nuevo }).eq("id", id);
+    if (error) { toast(error.message.includes("duplicate") ? "Ya hay otra cajera con ese nombre" : "Error: " + error.message, 4000); return; }
+    await fetchCajeras(); renderCajerasAdmin();
+    toast("Nombre actualizado (aparece en la caja)");
+  });
+
+  // Activo/oculto
+  document.querySelectorAll(".cajera-toggle").forEach(b => b.onclick = async () => {
+    const nuevoActivo = !(b.dataset.activo === "true");
+    if (!nuevoActivo && !confirm("¿Ocultar esta cajera? Deja de aparecer en el select. Los cierres viejos NO se borran.")) return;
+    const { error } = await sb.from("cajera").update({ activo: nuevoActivo }).eq("id", b.dataset.id);
+    if (error) { toast("Error: " + error.message, 4000); return; }
+    await fetchCajeras(); renderCajerasAdmin();
+    toast(nuevoActivo ? "Visible en la caja" : "Oculta en la caja");
+  });
+
+  // Borrar (solo si NO tiene histórico)
+  document.querySelectorAll(".cajera-del").forEach(b => b.onclick = async () => {
+    if (!confirm("¿Borrar esta cajera definitivamente? (No tiene cierres históricos a su nombre).")) return;
+    const { error } = await sb.from("cajera").delete().eq("id", b.dataset.id);
+    if (error) { toast("Error: " + error.message, 4000); return; }
+    await fetchCajeras(); renderCajerasAdmin();
+    toast("Cajera borrada");
+  });
+}
+
+function wireCajerasListeners() {
+  const add = $("addCajeraBtn");
+  if (add) add.addEventListener("click", async () => {
+    const nombre = ($("nuevaCajeraNombre").value || "").trim();
+    if (!nombre) { toast("Poné un nombre"); return; }
+    const orden = (state.cajeras?.length || 0) + 1;
+    const { error } = await sb.from("cajera").insert({ nombre, orden, activo: true });
+    if (error) { toast(error.message.includes("duplicate") ? "Ya existe una cajera con ese nombre" : "Error: " + error.message, 4000); return; }
+    $("nuevaCajeraNombre").value = "";
+    await fetchCajeras(); renderCajerasAdmin();
+    toast("Cajera agregada (aparece en la caja)");
+  });
+  const inp = $("nuevaCajeraNombre");
+  if (inp) inp.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); add?.click(); }
+  });
+}
+
 function wireFormasPagoListeners() {
   const add = $("addFpBtn");
   if (add) add.addEventListener("click", async () => {
@@ -1151,6 +1251,7 @@ function init() {
   wireSacosListeners();
   wireSacosInventarioListeners();
   wireFormasPagoListeners();
+  wireCajerasListeners();
 }
 
 // ============================================================

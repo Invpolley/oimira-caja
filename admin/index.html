@@ -562,6 +562,14 @@
       <p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-2">⚠️ Cambiá solo el <b>nombre visible</b>. Si <b>ocultás</b> un canal, cambia lo que se ve en los totales (la data no se borra).</p>
       <div id="canalesAdmin" class="space-y-1"></div>
 
+      <div class="text-xs font-bold text-gray-600 mb-1 mt-4 border-t border-gray-100 pt-3">👥 Cajeras / colaboradores</div>
+      <p class="text-[11px] text-gray-400 mb-2">Son los nombres que la cajera elige en la pantalla principal. Podés renombrar (✏️ + 💾), ocultar (visible/oculto) o agregar nuevos. Si tiene cierres históricos, queda 🔒 (no se borra).</p>
+      <div id="cajerasAdmin" class="space-y-1"></div>
+      <div class="flex gap-1 mt-2 items-center">
+        <input id="nuevaCajeraNombre" type="text" placeholder="Nueva cajera (nombre)" class="flex-1 p-1.5 border-2 border-gray-300 rounded text-sm"/>
+        <button id="addCajeraBtn" type="button" class="px-3 bg-amber-600 text-white rounded text-sm font-bold">+</button>
+      </div>
+
       <div class="text-xs font-bold text-gray-600 mb-1 mt-4 border-t border-gray-100 pt-3">💳 Formas de pago (caja)</div>
       <p class="text-[11px] text-gray-400 mb-2">Son los nombres que ve la cajera en "Ingresos del día". Podés renombrar (✏️ + 💾), ocultar (visible/oculto) o agregar nuevas. El nombre interno no cambia, así no se rompen los cierres. Las base tienen 🔒 (no se borran).</p>
       <div id="formasPagoAdmin" class="space-y-1"></div>

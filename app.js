@@ -26,12 +26,46 @@ function todayLocalISO() {
 // Persistencia simple de la cajera en localStorage
 // ============================================================================
 const CAJERA_LS_KEY = "oimira_cajera";
+const CAJERAS_CACHE_LS_KEY = "oimira_cajeras_cache";
+
 function loadCajera() {
   try { return localStorage.getItem(CAJERA_LS_KEY) || CAJERA_DEFAULT; }
   catch { return CAJERA_DEFAULT; }
 }
 function saveCajera(nombre) {
   try { localStorage.setItem(CAJERA_LS_KEY, nombre); } catch {}
+}
+
+// Cache offline de la lista de cajeras (para no quedarse vacía si Supabase falla)
+function loadCajerasCache() {
+  try {
+    const raw = localStorage.getItem(CAJERAS_CACHE_LS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+function saveCajerasCache(lista) {
+  try { localStorage.setItem(CAJERAS_CACHE_LS_KEY, JSON.stringify(lista)); } catch {}
+}
+
+// Estado de las cajeras (se llena en loadCatalog desde la tabla "cajera")
+let cajerasCatalog = loadCajerasCache(); // arranca con cache offline
+
+// Reconstruye el <select id="cajera"> con la lista actual + "Otra"
+function populateCajeraSelect() {
+  const sel = document.getElementById("cajera");
+  if (!sel) return;
+  const valActual = state.cajera || sel.value;
+  const lista = (cajerasCatalog && cajerasCatalog.length > 0)
+    ? cajerasCatalog.filter(c => c.activo !== false).sort((a,b) => (a.orden||0) - (b.orden||0))
+    : [];
+  // Si vino vacío, dejar al menos el default para que la cajera pueda elegir algo
+  const nombres = lista.length > 0 ? lista.map(c => c.nombre) : [CAJERA_DEFAULT];
+  // Asegurar que el valor actual esté presente (caso "Otra…" típed previamente)
+  if (valActual && !nombres.includes(valActual)) nombres.push(valActual);
+  sel.innerHTML = nombres.map(n =>
+    `<option value="${n}">${n}</option>`
+  ).join("") + '<option value="Otra">Otra...</option>';
+  sel.value = valActual;
 }
 
 // ============================================================================
@@ -490,6 +524,17 @@ async function loadCatalog() {
     ingresosCatalog = INGRESOS_CATALOG_FALLBACK.slice();
   }
 
+  // Cajeras (admin-manejable)
+  try {
+    const { data: cjs, error: ec } = await supabase
+      .from('cajera').select('*').order('orden');
+    if (!ec && cjs && cjs.length > 0) {
+      cajerasCatalog = cjs;
+      saveCajerasCache(cjs);
+    }
+  } catch (e) { console.warn("loadCatalog cajeras error:", e); }
+  populateCajeraSelect();
+
   // Catálogo de sacos (tipo + peso = un solo producto)
   try {
     const { data, error } = await supabase
@@ -637,13 +682,10 @@ function bindStatic() {
   });
 
   // Cajera — con persistencia entre sesiones (localStorage)
+  // La lista de opciones se reconstruye desde la tabla "cajera" (cargada en loadCatalog).
+  // populateCajeraSelect ya garantiza que el state.cajera esté presente y seleccionado.
+  populateCajeraSelect();
   const cajeraSel = document.getElementById("cajera");
-  // Si la cajera guardada no está en el select (ej. es un nombre custom viejo), agregarla
-  if (state.cajera && ![...cajeraSel.options].some(o => o.value === state.cajera)) {
-    const opt = document.createElement("option");
-    opt.value = state.cajera; opt.textContent = state.cajera;
-    cajeraSel.insertBefore(opt, cajeraSel.querySelector('option[value="Otra"]'));
-  }
   cajeraSel.value = state.cajera;
   cajeraSel.addEventListener("change", (e) => {
     if (e.target.value === "Otra") {
