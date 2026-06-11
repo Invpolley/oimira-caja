@@ -1434,47 +1434,63 @@ async function fetchUltimoSaldo(beforeFecha) {
   return data[0];
 }
 
-// ------------- Render cards -------------
+// ------------- Render cards (7 canales) -------------
 function renderCajaSaldos() {
   // Aplicar nombres/visibilidad de canales (renombrados desde el panel)
   aplicarLabelsCanales();
-  // El card superior muestra los saldos del último cierre disponible (más reciente)
   const latest = state.cajaSaldos[0];
   const label = $("cajaFechaLabel");
+
+  const setEmpty = () => {
+    $("cajaEfectivo").textContent     = fmtR(0);
+    $("cajaPix").textContent          = fmtR(0);
+    $("cajaPuntoBr").textContent      = fmtR(0);
+    $("cajaPagoMovil").textContent    = fmtB(0);
+    $("cajaBanescoPos").textContent   = fmtB(0);
+    $("cajaBsEfectivo").textContent   = fmtB(0);
+    $("cajaUsd").textContent          = fmtU(0);
+    $("cajaTotalEfectivo").textContent = fmtR(0);
+    $("cajaRecargas").textContent     = "—";
+    ["cajaEfectivoDetail","cajaPixDetail","cajaPuntoBrDetail","cajaPagoMovilDetail","cajaBanescoPosDetail","cajaBsEfectivoDetail","cajaUsdDetail"]
+      .forEach(id => { const el = $(id); if (el) el.textContent = ""; });
+  };
+
   if (!latest) {
     label.textContent = "Sin cierres de caja en este rango";
-    $("cajaEfectivo").textContent = fmtR(0);
-    $("cajaPunto").textContent = fmtB(0);
-    $("cajaPuntoBr").textContent = fmtR(0);
-    $("cajaUsd").textContent = fmtU(0);
-    $("cajaBcu").textContent = fmtB(0);
-    $("cajaTotalEfectivo").textContent = fmtR(0);
-    $("cajaRecargas").textContent = "—";
-    ["cajaEfectivoDetail","cajaPuntoDetail","cajaPuntoBrDetail","cajaUsdDetail"].forEach(id => $(id).textContent = "");
+    setEmpty();
     return;
   }
   label.textContent = `Último cierre: ${fmtFecha(latest.fecha)} · Polley`;
 
-  // Efectivo
+  // Efectivo R$
   $("cajaEfectivo").textContent = fmtR(latest.efectivo_saldo_total);
   $("cajaEfectivoDetail").textContent = `ant ${fmtN(latest.efectivo_saldo_ant)} + hoy ${fmtN(latest.efectivo_hoy)}${Number(latest.gastos_efectivo_hoy) > 0 ? " − gastos " + fmtN(latest.gastos_efectivo_hoy) : ""}`;
 
-  // Punto (Bs)
-  $("cajaPunto").textContent = fmtB(latest.punto_saldo_total);
-  $("cajaPuntoDetail").textContent = `ant ${fmtN(latest.punto_saldo_ant)} + hoy ${fmtN(latest.punto_hoy)}`;
+  // PIX R$
+  $("cajaPix").textContent = fmtR(latest.pix_saldo_total);
+  $("cajaPixDetail").textContent = `ant ${fmtN(latest.pix_saldo_ant)} + hoy ${fmtN(latest.pix_hoy)}`;
 
-  // Punto Br (R$)
+  // Punto Br R$
   $("cajaPuntoBr").textContent = fmtR(latest.punto_br_saldo_total);
   $("cajaPuntoBrDetail").textContent = `ant ${fmtN(latest.punto_br_saldo_ant)} + hoy ${fmtN(latest.punto_br_hoy)}`;
 
-  // USD
+  // Pago Móvil Banesco (Bs)
+  $("cajaPagoMovil").textContent = fmtB(latest.pago_movil_saldo_total);
+  $("cajaPagoMovilDetail").textContent = `ant ${fmtN(latest.pago_movil_saldo_ant)} + hoy ${fmtN(latest.pago_movil_hoy)}`;
+
+  // Banesco POS Bs
+  $("cajaBanescoPos").textContent = fmtB(latest.banesco_pos_saldo_total);
+  $("cajaBanescoPosDetail").textContent = `ant ${fmtN(latest.banesco_pos_saldo_ant)} + hoy ${fmtN(latest.banesco_pos_hoy)}`;
+
+  // Bs efectivo
+  $("cajaBsEfectivo").textContent = fmtB(latest.bs_efectivo_saldo_total);
+  $("cajaBsEfectivoDetail").textContent = `ant ${fmtN(latest.bs_efectivo_saldo_ant)} + hoy ${fmtN(latest.bs_efectivo_hoy)}`;
+
+  // USD físico
   $("cajaUsd").textContent = fmtU(latest.usd_saldo_total);
   $("cajaUsdDetail").textContent = `ant ${fmtN(latest.usd_saldo_ant)} + hoy ${fmtN(latest.usd_hoy)}`;
 
-  // BCU (Bs)
-  $("cajaBcu").textContent = fmtB(latest.bcu_saldo);
-
-  // Total
+  // Total efectivo R$ (la caja física)
   $("cajaTotalEfectivo").textContent = fmtR(latest.efectivo_saldo_total);
   $("cajaRecargas").textContent = Number(latest.transf_recarga || 0) > 0
     ? fmtMoeda(latest.transf_recarga, latest.transf_recarga_moeda || "R$")
@@ -1679,65 +1695,201 @@ async function cargarCierreCaja(fecha) {
     .select("*")
     .eq("fecha", fecha)
     .maybeSingle();
-
   if (error) { toast("Error cargando: " + error.message); return; }
+
+  // 2. Datos de la cajera para esta fecha (auto-fill source)
+  const autofill = await fetchDiaCierreAutofill(fecha);
 
   const banner = $("cc_modeBanner");
   banner.classList.remove("hidden");
 
   if (existing) {
-    // Modo EDITAR — traer todos los valores del registro guardado
-    $("cc_efectivo_ant").value     = existing.efectivo_saldo_ant || 0;
-    $("cc_efectivo_hoy").value     = existing.efectivo_hoy || 0;
-    $("cc_gastos_efectivo").value  = existing.gastos_efectivo_hoy || 0;
-    $("cc_punto_ant").value        = existing.punto_saldo_ant || 0;
-    $("cc_punto_hoy").value        = existing.punto_hoy || 0;
-    $("cc_puntobr_ant").value      = existing.punto_br_saldo_ant || 0;
-    $("cc_puntobr_hoy").value      = existing.punto_br_hoy || 0;
-    $("cc_usd_ant").value          = existing.usd_saldo_ant || 0;
-    $("cc_usd_hoy").value          = existing.usd_hoy || 0;
-    $("cc_bcu").value              = existing.bcu_saldo || 0;
-    $("cc_recarga").value          = existing.transf_recarga || 0;
-    $("cc_notas").value            = existing.notas || "";
+    // Modo EDITAR — traer todos los valores del registro guardado (7 canales)
+    $("cc_efectivo_ant").value      = existing.efectivo_saldo_ant || 0;
+    $("cc_efectivo_hoy").value      = existing.efectivo_hoy || 0;
+    $("cc_gastos_efectivo").value   = existing.gastos_efectivo_hoy || 0;
+    $("cc_pix_ant").value           = existing.pix_saldo_ant || 0;
+    $("cc_pix_hoy").value            = existing.pix_hoy || 0;
+    $("cc_puntobr_ant").value       = existing.punto_br_saldo_ant || 0;
+    $("cc_puntobr_hoy").value        = existing.punto_br_hoy || 0;
+    $("cc_pago_movil_ant").value    = existing.pago_movil_saldo_ant || 0;
+    $("cc_pago_movil_hoy").value     = existing.pago_movil_hoy || 0;
+    $("cc_banesco_pos_ant").value   = existing.banesco_pos_saldo_ant || 0;
+    $("cc_banesco_pos_hoy").value    = existing.banesco_pos_hoy || 0;
+    $("cc_bs_efectivo_ant").value   = existing.bs_efectivo_saldo_ant || 0;
+    $("cc_bs_efectivo_hoy").value    = existing.bs_efectivo_hoy || 0;
+    $("cc_usd_ant").value           = existing.usd_saldo_ant || 0;
+    $("cc_usd_hoy").value            = existing.usd_hoy || 0;
+    $("cc_recarga").value           = existing.transf_recarga || 0;
+    $("cc_notas").value             = existing.notas || "";
 
     banner.className = "mb-3 px-3 py-2 rounded-lg text-xs font-semibold border-2 bg-amber-50 border-amber-300 text-amber-900";
     banner.innerHTML = "✏️ <b>Editando cierre existente</b> del " + fmtFecha(fecha) + " — los cambios sobrescriben el registro guardado.";
   } else {
-    // Modo NUEVO — autocompletar saldos_ant del día anterior, resto en 0
+    // Modo NUEVO — autocompletar saldos_ant del día anterior + hoy desde cajera
     const last = await fetchUltimoSaldo(fecha);
     if (last) {
-      $("cc_efectivo_ant").value = last.efectivo_saldo_total || 0;
-      $("cc_punto_ant").value    = last.punto_saldo_total || 0;
-      $("cc_puntobr_ant").value  = last.punto_br_saldo_total || 0;
-      $("cc_usd_ant").value      = last.usd_saldo_total || 0;
-      $("cc_bcu").value          = last.bcu_saldo || 0;
+      $("cc_efectivo_ant").value     = last.efectivo_saldo_total || 0;
+      $("cc_pix_ant").value          = last.pix_saldo_total || 0;
+      $("cc_puntobr_ant").value      = last.punto_br_saldo_total || 0;
+      $("cc_pago_movil_ant").value   = last.pago_movil_saldo_total || 0;
+      $("cc_banesco_pos_ant").value  = last.banesco_pos_saldo_total || 0;
+      $("cc_bs_efectivo_ant").value  = last.bs_efectivo_saldo_total || 0;
+      $("cc_usd_ant").value          = last.usd_saldo_total || 0;
     } else {
-      ["cc_efectivo_ant","cc_punto_ant","cc_puntobr_ant","cc_usd_ant","cc_bcu"].forEach(id => $(id).value = 0);
+      ["cc_efectivo_ant","cc_pix_ant","cc_puntobr_ant","cc_pago_movil_ant","cc_banesco_pos_ant","cc_bs_efectivo_ant","cc_usd_ant"]
+        .forEach(id => $(id).value = 0);
     }
-    ["cc_efectivo_hoy","cc_gastos_efectivo","cc_punto_hoy","cc_puntobr_hoy","cc_usd_hoy","cc_recarga"].forEach(id => $(id).value = 0);
+    // Hoy + recarga + notas reset, y luego auto-fill desde cajera si reportó
+    ["cc_efectivo_hoy","cc_gastos_efectivo","cc_pix_hoy","cc_puntobr_hoy","cc_pago_movil_hoy","cc_banesco_pos_hoy","cc_bs_efectivo_hoy","cc_usd_hoy","cc_recarga"]
+      .forEach(id => $(id).value = 0);
     $("cc_notas").value = "";
 
-    banner.className = "mb-3 px-3 py-2 rounded-lg text-xs font-semibold border-2 bg-blue-50 border-blue-300 text-blue-900";
-    banner.innerHTML = "🆕 <b>Nuevo cierre</b> del " + fmtFecha(fecha) + " — saldos anteriores auto-completados del último cierre.";
+    if (autofill) {
+      $("cc_efectivo_hoy").value      = autofill.efectivo_hoy;
+      $("cc_gastos_efectivo").value   = autofill.gastos_efectivo_hoy;
+      $("cc_pix_hoy").value           = autofill.pix_hoy;
+      $("cc_puntobr_hoy").value       = autofill.punto_br_hoy;
+      $("cc_pago_movil_hoy").value    = autofill.pago_movil_hoy;
+      $("cc_banesco_pos_hoy").value   = autofill.banesco_pos_hoy;
+      $("cc_bs_efectivo_hoy").value   = autofill.bs_efectivo_hoy;
+      $("cc_usd_hoy").value           = autofill.usd_hoy;
+      banner.className = "mb-3 px-3 py-2 rounded-lg text-xs font-semibold border-2 bg-blue-50 border-blue-300 text-blue-900";
+      banner.innerHTML = "🆕 <b>Nuevo cierre</b> del " + fmtFecha(fecha) +
+        " — saldos anteriores del cierre previo, <b>valores 'hoy' tomados de la cajera</b>" +
+        (autofill.cajera ? " (" + escapeHtml(autofill.cajera) + ")" : "") + ".";
+    } else {
+      banner.className = "mb-3 px-3 py-2 rounded-lg text-xs font-semibold border-2 bg-yellow-50 border-yellow-300 text-yellow-900";
+      banner.innerHTML = "🆕 <b>Nuevo cierre</b> del " + fmtFecha(fecha) +
+        " — la cajera todavía no transmitió cierre para esta fecha, completá los 'hoy' a mano.";
+    }
   }
+
+  // Hints debajo de cada campo "hoy" con lo que reportó la cajera
+  if (autofill) renderAutofillHints(autofill);
+  else clearAutofillHints();
 
   recalcCC();
 }
 
+// Trae los datos que la cajera reportó para una fecha (dia_cierre + gastos + forma_pago_extra Banesco POS).
+// Devuelve null si la cajera todavía no transmitió cierre.
+async function fetchDiaCierreAutofill(fecha) {
+  const { data: dc } = await sb
+    .from("dia_cierre")
+    .select("id, cajera, pix_rs, dinheiro_rs, debito_rs, pago_movil_bs, bs_efectivo_bs, usd_usd, transmitted_at")
+    .eq("fecha", fecha)
+    .maybeSingle();
+  if (!dc) return null;
+
+  // Gastos en efectivo R$ del día (lo que pagó la cajera en efectivo)
+  const { data: gastos } = await sb
+    .from("dia_gasto")
+    .select("monto, moeda, forma_pago")
+    .eq("dia_cierre_id", dc.id);
+  const gastosEfectivoRs = (gastos || [])
+    .filter(g => g.moeda === "R$" && (g.forma_pago === "Dinheiro" || g.forma_pago === "Efectivo"))
+    .reduce((s, g) => s + Number(g.monto || 0), 0);
+
+  // Banesco POS no tiene columna dedicada; viene en forma_pago_extra
+  const { data: extras } = await sb
+    .from("forma_pago_extra")
+    .select("monto, nombre, moeda")
+    .eq("dia_cierre_id", dc.id);
+  const banescoPos = (extras || [])
+    .filter(e => (e.nombre || "").trim().toLowerCase() === "banesco pos")
+    .reduce((s, e) => s + Number(e.monto || 0), 0);
+
+  return {
+    cajera: dc.cajera || null,
+    transmitted: !!dc.transmitted_at,
+    efectivo_hoy:        Number(dc.dinheiro_rs || 0),
+    pix_hoy:             Number(dc.pix_rs || 0),
+    punto_br_hoy:        Number(dc.debito_rs || 0),
+    pago_movil_hoy:      Number(dc.pago_movil_bs || 0),
+    bs_efectivo_hoy:     Number(dc.bs_efectivo_bs || 0),
+    banesco_pos_hoy:     banescoPos,
+    usd_hoy:             Number(dc.usd_usd || 0),
+    gastos_efectivo_hoy: gastosEfectivoRs,
+  };
+}
+
+function renderAutofillHints(af) {
+  const who = af.cajera ? "Cajera " + af.cajera : "Cajera";
+  const status = af.transmitted ? "" : " (borrador)";
+  const hints = {
+    cc_efectivo_hint:        `💡 ${who} reportó R$ ${fmtN(af.efectivo_hoy)}${status}`,
+    cc_gastos_efectivo_hint: `💡 Gastos efectivo registrados: R$ ${fmtN(af.gastos_efectivo_hoy)}`,
+    cc_pix_hint:             `💡 ${who} reportó R$ ${fmtN(af.pix_hoy)}${status}`,
+    cc_puntobr_hint:         `💡 ${who} reportó R$ ${fmtN(af.punto_br_hoy)}${status}`,
+    cc_pago_movil_hint:      `💡 ${who} reportó Bs ${fmtN(af.pago_movil_hoy)}${status}`,
+    cc_banesco_pos_hint:     `💡 ${who} reportó Bs ${fmtN(af.banesco_pos_hoy)}${status}`,
+    cc_bs_efectivo_hint:     `💡 ${who} reportó Bs ${fmtN(af.bs_efectivo_hoy)}${status}`,
+    cc_usd_hint:             `💡 ${who} reportó US$ ${fmtN(af.usd_hoy)}${status}`,
+  };
+  Object.entries(hints).forEach(([id, txt]) => {
+    const el = $(id);
+    if (el) el.textContent = txt;
+  });
+}
+
+function clearAutofillHints() {
+  ["cc_efectivo_hint","cc_gastos_efectivo_hint","cc_pix_hint","cc_puntobr_hint","cc_pago_movil_hint","cc_banesco_pos_hint","cc_bs_efectivo_hint","cc_usd_hint"]
+    .forEach(id => { const el = $(id); if (el) el.textContent = ""; });
+}
+
+// Botón Re-sync: vuelve a traer los valores de la cajera y los aplica a los campos "hoy"
+async function resyncDesdeCajera() {
+  const fecha = $("cc_fecha").value;
+  if (!fecha) { toast("Elegí una fecha primero"); return; }
+  const af = await fetchDiaCierreAutofill(fecha);
+  if (!af) { toast("La cajera no transmitió cierre para esta fecha"); return; }
+  $("cc_efectivo_hoy").value     = af.efectivo_hoy;
+  $("cc_gastos_efectivo").value  = af.gastos_efectivo_hoy;
+  $("cc_pix_hoy").value          = af.pix_hoy;
+  $("cc_puntobr_hoy").value      = af.punto_br_hoy;
+  $("cc_pago_movil_hoy").value   = af.pago_movil_hoy;
+  $("cc_banesco_pos_hoy").value  = af.banesco_pos_hoy;
+  $("cc_bs_efectivo_hoy").value  = af.bs_efectivo_hoy;
+  $("cc_usd_hoy").value          = af.usd_hoy;
+  renderAutofillHints(af);
+  recalcCC();
+  toast("Re-sincronizado desde lo que reportó la cajera");
+}
+
 function recalcCC() {
+  // Efectivo R$ (con gastos)
   const efAnt = Number($("cc_efectivo_ant").value) || 0;
   const efHoy = Number($("cc_efectivo_hoy").value) || 0;
-  const gas = Number($("cc_gastos_efectivo").value) || 0;
+  const gas   = Number($("cc_gastos_efectivo").value) || 0;
   $("cc_efectivo_total").textContent = fmtR(efAnt + efHoy - gas);
 
-  const pAnt = Number($("cc_punto_ant").value) || 0;
-  const pHoy = Number($("cc_punto_hoy").value) || 0;
-  $("cc_punto_total").textContent = fmtB(pAnt + pHoy);
+  // PIX R$
+  const pixAnt = Number($("cc_pix_ant").value) || 0;
+  const pixHoy = Number($("cc_pix_hoy").value) || 0;
+  $("cc_pix_total").textContent = fmtR(pixAnt + pixHoy);
 
+  // Punto Br R$
   const pbAnt = Number($("cc_puntobr_ant").value) || 0;
   const pbHoy = Number($("cc_puntobr_hoy").value) || 0;
   $("cc_puntobr_total").textContent = fmtR(pbAnt + pbHoy);
 
+  // Pago Móvil Banesco Bs
+  const pmAnt = Number($("cc_pago_movil_ant").value) || 0;
+  const pmHoy = Number($("cc_pago_movil_hoy").value) || 0;
+  $("cc_pago_movil_total").textContent = fmtB(pmAnt + pmHoy);
+
+  // Banesco POS Bs
+  const bpAnt = Number($("cc_banesco_pos_ant").value) || 0;
+  const bpHoy = Number($("cc_banesco_pos_hoy").value) || 0;
+  $("cc_banesco_pos_total").textContent = fmtB(bpAnt + bpHoy);
+
+  // Bs efectivo
+  const bsefAnt = Number($("cc_bs_efectivo_ant").value) || 0;
+  const bsefHoy = Number($("cc_bs_efectivo_hoy").value) || 0;
+  $("cc_bs_efectivo_total").textContent = fmtB(bsefAnt + bsefHoy);
+
+  // USD físico
   const uAnt = Number($("cc_usd_ant").value) || 0;
   const uHoy = Number($("cc_usd_hoy").value) || 0;
   $("cc_usd_total").textContent = fmtU(uAnt + uHoy);
@@ -1753,18 +1905,23 @@ async function guardarCierreCaja() {
   try {
     const payload = {
       fecha: $("cc_fecha").value,
-      efectivo_saldo_ant: Number($("cc_efectivo_ant").value) || 0,
-      efectivo_hoy: Number($("cc_efectivo_hoy").value) || 0,
-      gastos_efectivo_hoy: Number($("cc_gastos_efectivo").value) || 0,
-      punto_saldo_ant: Number($("cc_punto_ant").value) || 0,
-      punto_hoy: Number($("cc_punto_hoy").value) || 0,
-      punto_br_saldo_ant: Number($("cc_puntobr_ant").value) || 0,
-      punto_br_hoy: Number($("cc_puntobr_hoy").value) || 0,
-      usd_saldo_ant: Number($("cc_usd_ant").value) || 0,
-      usd_hoy: Number($("cc_usd_hoy").value) || 0,
-      bcu_saldo: Number($("cc_bcu").value) || 0,
-      transf_recarga: Number($("cc_recarga").value) || 0,
-      notas: $("cc_notas").value || null,
+      efectivo_saldo_ant:    Number($("cc_efectivo_ant").value) || 0,
+      efectivo_hoy:          Number($("cc_efectivo_hoy").value) || 0,
+      gastos_efectivo_hoy:   Number($("cc_gastos_efectivo").value) || 0,
+      pix_saldo_ant:         Number($("cc_pix_ant").value) || 0,
+      pix_hoy:               Number($("cc_pix_hoy").value) || 0,
+      punto_br_saldo_ant:    Number($("cc_puntobr_ant").value) || 0,
+      punto_br_hoy:          Number($("cc_puntobr_hoy").value) || 0,
+      pago_movil_saldo_ant:  Number($("cc_pago_movil_ant").value) || 0,
+      pago_movil_hoy:        Number($("cc_pago_movil_hoy").value) || 0,
+      banesco_pos_saldo_ant: Number($("cc_banesco_pos_ant").value) || 0,
+      banesco_pos_hoy:       Number($("cc_banesco_pos_hoy").value) || 0,
+      bs_efectivo_saldo_ant: Number($("cc_bs_efectivo_ant").value) || 0,
+      bs_efectivo_hoy:       Number($("cc_bs_efectivo_hoy").value) || 0,
+      usd_saldo_ant:         Number($("cc_usd_ant").value) || 0,
+      usd_hoy:               Number($("cc_usd_hoy").value) || 0,
+      transf_recarga:        Number($("cc_recarga").value) || 0,
+      notas:                 $("cc_notas").value || null,
       cajera: "Polley",
       updated_at: new Date().toISOString(),
     };
@@ -1792,15 +1949,15 @@ async function guardarCierreCaja() {
 // el saldo_total recién calculado del día que acabamos de guardar.
 // Devuelve true si propagó algo, false si no había día siguiente.
 async function propagarSaldoAlDiaSiguiente(fecha) {
-  // 1. Traer el saldo_total de HOY desde la view (ya incluye retiros)
+  // 1. Traer los saldos totales de HOY desde la view (descontados retiros)
   const { data: hoy, error: errHoy } = await sb
     .from("caja_saldo_resumen")
-    .select("efectivo_saldo_total, punto_saldo_total, punto_br_saldo_total, usd_saldo_total, bcu_saldo")
+    .select("efectivo_saldo_total, pix_saldo_total, punto_br_saldo_total, pago_movil_saldo_total, banesco_pos_saldo_total, bs_efectivo_saldo_total, usd_saldo_total")
     .eq("fecha", fecha)
     .maybeSingle();
   if (errHoy || !hoy) return false;
 
-  // 2. Buscar el cierre del día SIGUIENTE (el más cercano hacia adelante)
+  // 2. Cierre del día SIGUIENTE
   const { data: sig, error: errSig } = await sb
     .from("caja_saldo")
     .select("id, fecha")
@@ -1809,12 +1966,15 @@ async function propagarSaldoAlDiaSiguiente(fecha) {
     .limit(1);
   if (errSig || !sig || !sig.length) return false;
 
-  // 3. Actualizar saldo_ant del día siguiente
+  // 3. Propagar los 7 saldos
   const update = {
-    efectivo_saldo_ant: hoy.efectivo_saldo_total || 0,
-    punto_saldo_ant:    hoy.punto_saldo_total    || 0,
-    punto_br_saldo_ant: hoy.punto_br_saldo_total || 0,
-    usd_saldo_ant:      hoy.usd_saldo_total      || 0,
+    efectivo_saldo_ant:    hoy.efectivo_saldo_total    || 0,
+    pix_saldo_ant:         hoy.pix_saldo_total         || 0,
+    punto_br_saldo_ant:    hoy.punto_br_saldo_total    || 0,
+    pago_movil_saldo_ant:  hoy.pago_movil_saldo_total  || 0,
+    banesco_pos_saldo_ant: hoy.banesco_pos_saldo_total || 0,
+    bs_efectivo_saldo_ant: hoy.bs_efectivo_saldo_total || 0,
+    usd_saldo_ant:         hoy.usd_saldo_total         || 0,
     updated_at: new Date().toISOString(),
   };
   const { error: errUpd } = await sb
@@ -1908,11 +2068,13 @@ function renderSaldosEnCanales() {
   const latest = state.cajaSaldos[0];
   if (!latest) return;
   const mapSaldos = {
-    Efectivo: [latest.efectivo_saldo_total, "R$"],
-    Punto: [latest.punto_saldo_total, "Bs"],
-    PuntoBr: [latest.punto_br_saldo_total, "R$"],
-    USD: [latest.usd_saldo_total, "USD"],
-    BCU: [latest.bcu_saldo, "R$"],
+    Efectivo:   [latest.efectivo_saldo_total,    "R$"],
+    PIX:        [latest.pix_saldo_total,         "R$"],
+    PuntoBr:    [latest.punto_br_saldo_total,    "R$"],
+    PagoMovil:  [latest.pago_movil_saldo_total,  "Bs"],
+    BanescoPos: [latest.banesco_pos_saldo_total, "Bs"],
+    BsEfectivo: [latest.bs_efectivo_saldo_total, "Bs"],
+    USD:        [latest.usd_saldo_total,         "USD"],
   };
   document.querySelectorAll(".saldo-canal").forEach(el => {
     const c = el.dataset.canal;
@@ -1934,11 +2096,13 @@ function selectCanal(canal) {
   const latest = state.cajaSaldos[0];
   if (latest) {
     const saldoMap = {
-      Efectivo: latest.efectivo_saldo_total,
-      Punto: latest.punto_saldo_total,
-      PuntoBr: latest.punto_br_saldo_total,
-      USD: latest.usd_saldo_total,
-      BCU: latest.bcu_saldo,
+      Efectivo:   latest.efectivo_saldo_total,
+      PIX:        latest.pix_saldo_total,
+      PuntoBr:    latest.punto_br_saldo_total,
+      PagoMovil:  latest.pago_movil_saldo_total,
+      BanescoPos: latest.banesco_pos_saldo_total,
+      BsEfectivo: latest.bs_efectivo_saldo_total,
+      USD:        latest.usd_saldo_total,
     };
     const saldo = saldoMap[canal] || 0;
     $("rt_canalSaldo").textContent = "💡 Saldo disponible en " + canalLabel(canal) + ": " + fmtMoeda(saldo, RETIRO_STATE.moeda);
@@ -2000,11 +2164,13 @@ async function guardarRetiro() {
   const latest = state.cajaSaldos[0];
   if (latest) {
     const saldoMap = {
-      Efectivo: latest.efectivo_saldo_total,
-      Punto: latest.punto_saldo_total,
-      PuntoBr: latest.punto_br_saldo_total,
-      USD: latest.usd_saldo_total,
-      BCU: latest.bcu_saldo,
+      Efectivo:   latest.efectivo_saldo_total,
+      PIX:        latest.pix_saldo_total,
+      PuntoBr:    latest.punto_br_saldo_total,
+      PagoMovil:  latest.pago_movil_saldo_total,
+      BanescoPos: latest.banesco_pos_saldo_total,
+      BsEfectivo: latest.bs_efectivo_saldo_total,
+      USD:        latest.usd_saldo_total,
     };
     const disponible = Number(saldoMap[canal] || 0);
     if (monto > disponible) {
@@ -2084,16 +2250,19 @@ async function reconciliarCadena() {
 
     const { data: prevResumen } = await sb
       .from("caja_saldo_resumen")
-      .select("efectivo_saldo_total, punto_saldo_total, punto_br_saldo_total, usd_saldo_total")
+      .select("efectivo_saldo_total, pix_saldo_total, punto_br_saldo_total, pago_movil_saldo_total, banesco_pos_saldo_total, bs_efectivo_saldo_total, usd_saldo_total")
       .eq("fecha", prev.fecha)
       .maybeSingle();
     if (!prevResumen) continue;
 
     const update = {
-      efectivo_saldo_ant: prevResumen.efectivo_saldo_total || 0,
-      punto_saldo_ant:    prevResumen.punto_saldo_total    || 0,
-      punto_br_saldo_ant: prevResumen.punto_br_saldo_total || 0,
-      usd_saldo_ant:      prevResumen.usd_saldo_total      || 0,
+      efectivo_saldo_ant:    prevResumen.efectivo_saldo_total    || 0,
+      pix_saldo_ant:         prevResumen.pix_saldo_total         || 0,
+      punto_br_saldo_ant:    prevResumen.punto_br_saldo_total    || 0,
+      pago_movil_saldo_ant:  prevResumen.pago_movil_saldo_total  || 0,
+      banesco_pos_saldo_ant: prevResumen.banesco_pos_saldo_total || 0,
+      bs_efectivo_saldo_ant: prevResumen.bs_efectivo_saldo_total || 0,
+      usd_saldo_ant:         prevResumen.usd_saldo_total         || 0,
       updated_at: new Date().toISOString(),
     };
     const { error: errUpd } = await sb
@@ -2116,13 +2285,20 @@ function wireCajaListeners() {
   $("rt_guardar").addEventListener("click", guardarRetiro);
   const reconBtn = document.getElementById("reconciliarSaldosBtn");
   if (reconBtn) reconBtn.addEventListener("click", reconciliarCadena);
-  // Recalc en vivo del cierre de caja
+  // Recalc en vivo del cierre de caja (7 canales)
   ["cc_efectivo_ant","cc_efectivo_hoy","cc_gastos_efectivo",
-   "cc_punto_ant","cc_punto_hoy",
+   "cc_pix_ant","cc_pix_hoy",
    "cc_puntobr_ant","cc_puntobr_hoy",
+   "cc_pago_movil_ant","cc_pago_movil_hoy",
+   "cc_banesco_pos_ant","cc_banesco_pos_hoy",
+   "cc_bs_efectivo_ant","cc_bs_efectivo_hoy",
    "cc_usd_ant","cc_usd_hoy"].forEach(id => {
-    $(id).addEventListener("input", recalcCC);
+    const el = $(id);
+    if (el) el.addEventListener("input", recalcCC);
   });
+  // Botón Re-sincronizar con lo que reportó la cajera
+  const resyncBtn = document.getElementById("cc_resync");
+  if (resyncBtn) resyncBtn.addEventListener("click", resyncDesdeCajera);
 
   // Al cambiar la fecha, recargar los datos de ese día (nuevo o editar)
   $("cc_fecha").addEventListener("change", (e) => cargarCierreCaja(e.target.value));
