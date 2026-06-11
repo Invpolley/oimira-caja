@@ -780,7 +780,11 @@ function bindStatic() {
 
   // Confirm modal
   document.getElementById("conf_cancelar").addEventListener("click", () => toggleModal("modalConfirmar", false));
-  document.getElementById("conf_enviar").addEventListener("click", () => {
+  document.getElementById("conf_enviar").addEventListener("click", (e) => {
+    // Guard contra doble-click en el botón Confirmar: si ya fue activado, ignorar.
+    const cBtn = e.currentTarget;
+    if (cBtn.disabled) return;
+    cBtn.disabled = true; // se rehabilita al reabrir el modal
     toggleModal("modalConfirmar", false);
     enviarCierre(/*transmitir*/ true);
   });
@@ -913,6 +917,11 @@ async function submitUnlockCode() {
 // Modal de confirmación de envío
 // ============================================================
 function openConfirmModal() {
+  // Reset del guard de doble-click cada vez que se abre el modal
+  const _confBtn = document.getElementById("conf_enviar");
+  if (_confBtn) {
+    _confBtn.disabled = !document.getElementById("conf_check")?.checked;
+  }
   // Validar que haya algo que enviar
   const tieneIngresos = state.ingresos.some(i => Number(i.monto) > 0);
   const tieneGastos = state.gastos.some(g => Number(g.monto) > 0);

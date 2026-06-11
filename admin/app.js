@@ -1744,37 +1744,48 @@ function recalcCC() {
 }
 
 async function guardarCierreCaja() {
-  const payload = {
-    fecha: $("cc_fecha").value,
-    efectivo_saldo_ant: Number($("cc_efectivo_ant").value) || 0,
-    efectivo_hoy: Number($("cc_efectivo_hoy").value) || 0,
-    gastos_efectivo_hoy: Number($("cc_gastos_efectivo").value) || 0,
-    punto_saldo_ant: Number($("cc_punto_ant").value) || 0,
-    punto_hoy: Number($("cc_punto_hoy").value) || 0,
-    punto_br_saldo_ant: Number($("cc_puntobr_ant").value) || 0,
-    punto_br_hoy: Number($("cc_puntobr_hoy").value) || 0,
-    usd_saldo_ant: Number($("cc_usd_ant").value) || 0,
-    usd_hoy: Number($("cc_usd_hoy").value) || 0,
-    bcu_saldo: Number($("cc_bcu").value) || 0,
-    transf_recarga: Number($("cc_recarga").value) || 0,
-    notas: $("cc_notas").value || null,
-    cajera: "Polley",
-    updated_at: new Date().toISOString(),
-  };
-  if (!payload.fecha) { toast("Poné una fecha"); return; }
+  // Guard contra doble-click: si ya está procesando, ignorar.
+  const btn = $("cc_guardar");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const _origLabel = btn.textContent;
+  btn.textContent = "Guardando…";
+  try {
+    const payload = {
+      fecha: $("cc_fecha").value,
+      efectivo_saldo_ant: Number($("cc_efectivo_ant").value) || 0,
+      efectivo_hoy: Number($("cc_efectivo_hoy").value) || 0,
+      gastos_efectivo_hoy: Number($("cc_gastos_efectivo").value) || 0,
+      punto_saldo_ant: Number($("cc_punto_ant").value) || 0,
+      punto_hoy: Number($("cc_punto_hoy").value) || 0,
+      punto_br_saldo_ant: Number($("cc_puntobr_ant").value) || 0,
+      punto_br_hoy: Number($("cc_puntobr_hoy").value) || 0,
+      usd_saldo_ant: Number($("cc_usd_ant").value) || 0,
+      usd_hoy: Number($("cc_usd_hoy").value) || 0,
+      bcu_saldo: Number($("cc_bcu").value) || 0,
+      transf_recarga: Number($("cc_recarga").value) || 0,
+      notas: $("cc_notas").value || null,
+      cajera: "Polley",
+      updated_at: new Date().toISOString(),
+    };
+    if (!payload.fecha) { toast("Poné una fecha"); return; }
 
-  const { error } = await sb.from("caja_saldo").upsert(payload, { onConflict: "fecha" });
-  if (error) { toast("Error: " + error.message, 4000); return; }
+    const { error } = await sb.from("caja_saldo").upsert(payload, { onConflict: "fecha" });
+    if (error) { toast("Error: " + error.message, 4000); return; }
 
-  // Propagar el nuevo saldo total al saldo_ant del día siguiente (si existe).
-  // Sin esto, editar un cierre viejo deja el día siguiente con un saldo_ant huérfano.
-  const propagado = await propagarSaldoAlDiaSiguiente(payload.fecha);
+    // Propagar el nuevo saldo total al saldo_ant del día siguiente (si existe).
+    // Sin esto, editar un cierre viejo deja el día siguiente con un saldo_ant huérfano.
+    const propagado = await propagarSaldoAlDiaSiguiente(payload.fecha);
 
-  toast(propagado
-    ? "Cierre guardado · saldo del día siguiente recalculado"
-    : "Cierre de caja guardado");
-  closeModal("modalCierreCaja");
-  reload();
+    toast(propagado
+      ? "Cierre guardado · saldo del día siguiente recalculado"
+      : "Cierre de caja guardado");
+    closeModal("modalCierreCaja");
+    reload();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = _origLabel;
+  }
 }
 
 // Recalcula el saldo_ant del cierre del día SIGUIENTE (si existe), usando
@@ -1965,6 +1976,10 @@ function actualizarResumenRetiro() {
 }
 
 async function guardarRetiro() {
+  // Guard contra doble-click: si ya está procesando, ignorar.
+  const btn = $("rt_guardar");
+  if (btn.disabled && btn.dataset.saving === "1") return;
+
   const { moeda, canal } = RETIRO_STATE;
   const monto = Number($("rt_monto").value);
   const nota = $("rt_nota").value.trim();
@@ -1974,6 +1989,12 @@ async function guardarRetiro() {
   if (!canal) { toast("Elegí de qué caja sale"); return; }
   if (!monto || monto <= 0) { toast("Monto inválido"); return; }
   if (!nota || nota.length < 3) { toast("Poné una nota de en qué se usó el dinero"); return; }
+
+  btn.disabled = true;
+  btn.dataset.saving = "1";
+  const _rtOrigLabel = btn.textContent;
+  btn.textContent = "Guardando…";
+  try {
 
   // Chequeo saldo (warning, no bloqueo — puede ser que cargues el movimiento antes del cierre)
   const latest = state.cajaSaldos[0];
@@ -2017,11 +2038,16 @@ async function guardarRetiro() {
   let propagado = false;
   if (caja_saldo_id) propagado = await propagarSaldoAlDiaSiguiente(fecha);
 
-  toast(propagado
-    ? `Retiro registrado · saldo del día siguiente recalculado`
-    : `Retiro de ${fmtMoeda(monto, moeda)} registrado`);
-  closeModal("modalRetiro");
-  reload();
+    toast(propagado
+      ? `Retiro registrado · saldo del día siguiente recalculado`
+      : `Retiro de ${fmtMoeda(monto, moeda)} registrado`);
+    closeModal("modalRetiro");
+    reload();
+  } finally {
+    btn.disabled = false;
+    btn.dataset.saving = "";
+    btn.textContent = _rtOrigLabel;
+  }
 }
 
 // ------------- Reconciliar cadena entera de saldos -------------
