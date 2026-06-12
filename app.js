@@ -54,17 +54,26 @@ let cajerasCatalog = loadCajerasCache(); // arranca con cache offline
 function populateCajeraSelect() {
   const sel = document.getElementById("cajera");
   if (!sel) return;
+  // Si todavía no se cargó el catálogo (primera carga sin cache local), NO tocar
+  // el select — dejá las opciones que estén en el HTML para que no quede pelado.
+  if (!cajerasCatalog || cajerasCatalog.length === 0) return;
+
   const valActual = state.cajera || sel.value;
-  const lista = (cajerasCatalog && cajerasCatalog.length > 0)
-    ? cajerasCatalog.filter(c => c.activo !== false).sort((a,b) => (a.orden||0) - (b.orden||0))
-    : [];
-  // Si vino vacío, dejar al menos el default para que la cajera pueda elegir algo
-  const nombres = lista.length > 0 ? lista.map(c => c.nombre) : [CAJERA_DEFAULT];
-  // Asegurar que el valor actual esté presente (caso "Otra…" típed previamente)
+  const nombres = cajerasCatalog
+    .filter(c => c.activo !== false)
+    .sort((a, b) => (a.orden || 0) - (b.orden || 0))
+    .map(c => c.nombre);
+
+  // Si el valor actual no está en la lista activa, igual lo agregamos para no
+  // perder selección (ej. cajera renombrada o "Otra..." escrita manualmente).
   if (valActual && !nombres.includes(valActual)) nombres.push(valActual);
-  sel.innerHTML = nombres.map(n =>
-    `<option value="${n}">${n}</option>`
-  ).join("") + '<option value="Otra">Otra...</option>';
+
+  // Estilos inline en cada <option> — sin esto, Chrome Windows hereda
+  // el "text-white" del padre y deja los items invisibles.
+  const opt = (n, label) =>
+    `<option value="${n}" style="color:#111;background:#fff;">${label || n}</option>`;
+
+  sel.innerHTML = nombres.map(n => opt(n)).join("") + opt("Otra", "Otra…");
   sel.value = valActual;
 }
 
@@ -1280,7 +1289,7 @@ window.addEventListener("appinstalled", () => {
 })();
 
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const APP_BUILD = "2026-06-12 · c18";
+const APP_BUILD = "2026-06-12 · c19";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
 
 // Registrar Service Worker
