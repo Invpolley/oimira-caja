@@ -893,6 +893,21 @@ function applyLockState() {
     if (locked) el.setAttribute("disabled", "true");
     else el.removeAttribute("disabled");
   });
+
+  // Botón Enviar: cambia texto + color según el estado de bloqueo.
+  // Al cambiar de día, state.transmittedAt = null → no locked → se restaura al original.
+  const enviarBtn = document.getElementById("enviarBtn");
+  if (enviarBtn) {
+    if (locked) {
+      enviarBtn.textContent = "🔒 Bloqueado — pedir código al admin";
+      enviarBtn.classList.remove("bg-gradient-to-r", "from-green-600", "to-emerald-600");
+      enviarBtn.classList.add("bg-gray-400", "cursor-not-allowed");
+    } else {
+      enviarBtn.textContent = "📤 Enviar cierre del día";
+      enviarBtn.classList.remove("bg-gray-400", "cursor-not-allowed");
+      enviarBtn.classList.add("bg-gradient-to-r", "from-green-600", "to-emerald-600");
+    }
+  }
 }
 
 // Timer del unlock
@@ -1140,8 +1155,10 @@ async function enviarCierre(transmitir = true) {
     toast("❌ Error: " + (err.message || err) + " — Guardado localmente, reintentar con internet");
     updateStatus();
   } finally {
-    btn.disabled = false;
-    btn.textContent = "📤 Enviar cierre del día";
+    // No tocar el botón directamente: applyLockState decide el texto/disable
+    // según state.transmittedAt. Si la transmisión fue exitosa el botón queda
+    // "🔒 Bloqueado"; si hubo error vuelve a "📤 Enviar cierre del día".
+    applyLockState();
   }
 }
 
