@@ -1376,8 +1376,20 @@ function wireCodigoListeners() {
 // ============================================================
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(err => {
-      console.warn("SW register failed:", err);
+    navigator.serviceWorker.register("./sw.js").then(reg => {
+      try { reg.update(); } catch {}
+      reg.addEventListener("updatefound", () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener("statechange", () => {
+          if (nw.state === "activated" && navigator.serviceWorker.controller) {
+            console.log("[SW admin] Nueva versión instalada — recargando…");
+            window.location.reload();
+          }
+        });
+      });
+    }).catch(err => {
+      console.warn("SW admin fail:", err);
     });
   });
 }

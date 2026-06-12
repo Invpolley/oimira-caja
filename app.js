@@ -1280,10 +1280,27 @@ window.addEventListener("appinstalled", () => {
 })();
 
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const APP_BUILD = "2026-05-31 · c15";
+const APP_BUILD = "2026-06-12 · c18";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
 
 // Registrar Service Worker
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js").catch(err => console.warn("SW fail:", err));
+  navigator.serviceWorker.register("sw.js").then(reg => {
+    // Forzar check de update inmediato (sin esto, el browser revisa el SW cada 24h)
+    try { reg.update(); } catch {}
+
+    // Detectar instalación de nueva versión y auto-recargar para que tome efecto
+    reg.addEventListener("updatefound", () => {
+      const nw = reg.installing;
+      if (!nw) return;
+      nw.addEventListener("statechange", () => {
+        // Solo recargar si ya había un SW controlando (ie. el celu ya tenía la app),
+        // para evitar reload infinito en la primera instalación.
+        if (nw.state === "activated" && navigator.serviceWorker.controller) {
+          console.log("[SW] Nueva versión instalada — recargando…");
+          window.location.reload();
+        }
+      });
+    });
+  }).catch(err => console.warn("SW fail:", err));
 }
