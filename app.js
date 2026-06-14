@@ -4,7 +4,7 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY, CAJERA_DEFAULT, DEVICE_NAME } from './config.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { db: { schema: "oimira_caja" } });
 
 // ============================================================================
 // Helpers de fecha en zona Caracas/La Paz (UTC-4) — FORZADA, no depende del device
