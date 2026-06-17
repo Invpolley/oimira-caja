@@ -1,5 +1,5 @@
 // Service Worker para OiMira Caja — cache + offline support
-const CACHE_NAME = "oimira-caja-v20";
+const CACHE_NAME = "oimira-caja-v21";
 const ASSETS = [
   "./",
   "./index.html",
@@ -33,26 +33,24 @@ self.addEventListener("activate", (e) => {
 // Strategy: network-first para API (supabase), cache-first para assets estáticos
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-
-  // Peticiones a Supabase siempre van a la red (no cachear datos)
-  if (url.hostname.endsWith(".supabase.co")) {
-    return; // fetch normal, sin interceptar
+  // Datos de Supabase: siempre a la red, sin interceptar
+  if (url.hostname.endsWith(".supabase.co")) return;
+  // CDNs (otro origen, no cambian): cache-first
+  if (url.origin !== location.origin) {
+    e.respondWith(
+      caches.match(e.request).then(c => c || fetch(e.request).then(r => {
+        if (r && r.ok) { const cp = r.clone(); caches.open(CACHE_NAME).then(c => c.put(e.request, cp)); }
+        return r;
+      }))
+    );
+    return;
   }
-
-  // Resto: cache-first
+  // Archivos propios (index.html, app.js, config.js...): NETWORK-FIRST.
+  // Trae siempre lo más nuevo; cae al caché solo si no hay conexión.
   e.respondWith(
-    caches.match(e.request).then(cached => {
-      return cached || fetch(e.request).then(resp => {
-        // Cachear el fetch nuevo para futuras visitas
-        if (resp.ok) {
-          const copy = resp.clone();
-          caches.open(CACHE_NAME).then(c => c.put(e.request, copy));
-        }
-        return resp;
-      }).catch(() => {
-        // Si offline y no cacheado, retornar index para SPA
-        if (e.request.mode === "navigate") return caches.match("./index.html");
-      });
-    })
+    fetch(e.request).then(r => {
+      if (r && r.ok) { const cp = r.clone(); caches.open(CACHE_NAME).then(c => c.put(e.request, cp)); }
+      return r;
+    }).catch(() => caches.match(e.request).then(c => c || (e.request.mode === "navigate" ? caches.match("./index.html") : undefined)))
   );
 });

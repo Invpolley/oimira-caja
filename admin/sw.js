@@ -1,5 +1,5 @@
 // Service Worker para OiMira Admin — cache + offline support
-const CACHE_NAME = "oimira-admin-v25";
+const CACHE_NAME = "oimira-admin-v26";
 const ASSETS = [
   "./",
   "./index.html",
@@ -34,20 +34,24 @@ self.addEventListener("activate", (e) => {
 // Network-first para API (Supabase), cache-first para assets
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  if (url.hostname.endsWith(".supabase.co")) {
-    return; // fetch normal, no interceptar
+  // Datos de Supabase: siempre a la red, sin interceptar
+  if (url.hostname.endsWith(".supabase.co")) return;
+  // CDNs (otro origen, no cambian): cache-first
+  if (url.origin !== location.origin) {
+    e.respondWith(
+      caches.match(e.request).then(c => c || fetch(e.request).then(r => {
+        if (r && r.ok) { const cp = r.clone(); caches.open(CACHE_NAME).then(c => c.put(e.request, cp)); }
+        return r;
+      }))
+    );
+    return;
   }
+  // Archivos propios (index.html, app.js, config.js...): NETWORK-FIRST.
+  // Trae siempre lo más nuevo; cae al caché solo si no hay conexión.
   e.respondWith(
-    caches.match(e.request).then(cached => {
-      return cached || fetch(e.request).then(resp => {
-        if (resp.ok) {
-          const copy = resp.clone();
-          caches.open(CACHE_NAME).then(c => c.put(e.request, copy));
-        }
-        return resp;
-      }).catch(() => {
-        if (e.request.mode === "navigate") return caches.match("./index.html");
-      });
-    })
+    fetch(e.request).then(r => {
+      if (r && r.ok) { const cp = r.clone(); caches.open(CACHE_NAME).then(c => c.put(e.request, cp)); }
+      return r;
+    }).catch(() => caches.match(e.request).then(c => c || (e.request.mode === "navigate" ? caches.match("./index.html") : undefined)))
   );
 });
