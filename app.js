@@ -607,6 +607,7 @@ async function loadExistingCierre() {
     'USD': 'usd_usd'
   };
   const extras = data.forma_pago_extra || [];
+  { const det = document.getElementById("efectivoDeteriorado"); if (det) det.value = Number(data.efectivo_deteriorado_rs || 0) || ""; }
   state.ingresos = ingresosCatalog.map(fp => {
     let monto = 0, id;
     if (fp.preset && fp.nombre === "Dinheiro") {
@@ -1068,6 +1069,7 @@ async function enviarCierre(transmitir = true) {
       pix_rs: getPreset('PIX'),
       dinheiro_rs: dinheiroRsNeto,              // ⚠ legacy: efectivo neto que queda
       ventas_efectivo_rs: ventasEfectivoRs,      // nuevo: venta efectivo bruta
+      efectivo_deteriorado_rs: Number(document.getElementById("efectivoDeteriorado")?.value || 0), // billetes en mal estado (para banco)
       debito_rs: getPreset('Débito POS'),
       pago_movil_bs: getPreset('Pago Móvil'),
       bs_efectivo_bs: getPreset('Bs efectivo'),
@@ -1289,7 +1291,7 @@ window.addEventListener("appinstalled", () => {
 })();
 
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const APP_BUILD = "2026-06-15 · c20";
+const APP_BUILD = "2026-07-22 · c21";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
 
 // Registrar Service Worker

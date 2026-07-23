@@ -361,6 +361,7 @@ function renderDias() {
       const formasHtml = [];
       if (Number(c.pix_rs) > 0) formasHtml.push(`<span class="pill pill-r">PIX ${fmtR(c.pix_rs)}</span>`);
       if (Number(c.dinheiro_rs) > 0) formasHtml.push(`<span class="pill pill-r">Efectivo ${fmtR(c.dinheiro_rs)}</span>`);
+      if (Number(c.efectivo_deteriorado_rs) > 0) formasHtml.push(`<span class="pill pill-r">🩹 Deteriorado ${fmtR(c.efectivo_deteriorado_rs)}</span>`);
       if (Number(c.debito_rs) > 0) formasHtml.push(`<span class="pill pill-r">Débito ${fmtR(c.debito_rs)}</span>`);
       if (Number(c.pago_movil_bs) > 0) formasHtml.push(`<span class="pill pill-b">Pago Móvil ${fmtB(c.pago_movil_bs)}</span>`);
       if (Number(c.bs_efectivo_bs) > 0) formasHtml.push(`<span class="pill pill-b">Bs efectivo ${fmtB(c.bs_efectivo_bs)}</span>`);
@@ -593,6 +594,7 @@ async function reload({ preserveExpanded = true } = {}) {
     renderSacosAnalitica();
     renderSacosAdmin();
     renderCanalesAdmin();
+    renderDeteriorado();
     renderFormasPagoAdmin();
     renderCajerasAdmin();
     renderCajaSaldos();
@@ -2445,6 +2447,24 @@ function wireCajaListeners() {
 // Arranque
 // ============================================================
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const ADMIN_BUILD = "2026-06-15 · a22";
+
+// 🩹 Fondo de billetes deteriorados = registrado por cajera − depositado al banco
+async function renderDeteriorado() {
+  try {
+    const [{ data: acum }, { data: dep }] = await Promise.all([
+      sb.from("dia_cierre").select("efectivo_deteriorado_rs"),
+      sb.from("caja_retiro").select("monto").eq("canal", "Efectivo").eq("motivo", "Depósito billetes deteriorados"),
+    ]);
+    const entrado = (acum || []).reduce((s, r) => s + Number(r.efectivo_deteriorado_rs || 0), 0);
+    const depositado = (dep || []).reduce((s, r) => s + Number(r.monto || 0), 0);
+    const card = document.getElementById("cardDeteriorado");
+    if (!card) return;
+    card.style.display = (entrado > 0 || depositado > 0) ? "" : "none";
+    const t = document.getElementById("detTotal"); if (t) t.textContent = fmtR(entrado - depositado);
+    const d = document.getElementById("detDetalle"); if (d) d.textContent = `Registrado ${fmtR(entrado)} · Depositado ${fmtR(depositado)}`;
+  } catch (e) { console.error("renderDeteriorado", e); }
+}
+
+const ADMIN_BUILD = "2026-07-22 · a23";
 (function(){ const e = document.getElementById("adminVersion"); if (e) e.textContent = "📊 Admin · v" + ADMIN_BUILD; })();
 setupPinGate();
