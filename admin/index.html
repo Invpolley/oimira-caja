@@ -208,6 +208,18 @@
   </div>
 </header>
 
+<!-- Aviso de stock bajo de trigo (se muestra solo si algun saco esta en o por debajo del minimo) -->
+<div id="alertaStockBanner" class="hidden max-w-5xl mx-auto px-3 pt-3">
+  <button id="alertaStockBannerBtn" class="w-full text-left bg-red-50 border-2 border-red-300 rounded-xl p-3 flex items-start gap-3 hover:bg-red-100 transition">
+    <span class="text-2xl leading-none">⚠️</span>
+    <span class="flex-1">
+      <span class="block font-bold text-red-800 text-sm">Stock de trigo bajo</span>
+      <span id="alertaStockBannerTexto" class="block text-xs text-red-700 mt-0.5"></span>
+    </span>
+    <span class="text-red-400 text-xl leading-none">&rsaquo;</span>
+  </button>
+</div>
+
 <main class="max-w-5xl mx-auto p-3 space-y-3">
 
   <!-- Filtro de rango -->
@@ -594,13 +606,27 @@
   </div>
 
   <!-- Modal: Ajustar existencia -->
+  <!-- Aviso de stock bajo al entrar al sistema -->
+  <div id="modalAlertaStock" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3">
+    <div class="bg-white rounded-2xl p-4 max-w-sm w-full max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="text-lg font-bold text-red-700">⚠️ Stock de trigo bajo</h2>
+        <button class="close-modal text-2xl text-gray-400 hover:text-gray-700" data-modal="modalAlertaStock">&times;</button>
+      </div>
+      <p class="text-xs text-gray-500 mb-3">Estos sacos llegaron al mínimo que configuraste. Conviene reponer.</p>
+      <div id="alertaStockLista" class="space-y-2"></div>
+      <button id="alertaStockAjustar" class="mt-4 w-full py-3 bg-amber-600 text-white rounded-xl font-bold">Ajustar existencia o mínimos</button>
+      <button class="close-modal mt-2 w-full py-2.5 text-gray-500 text-sm" data-modal="modalAlertaStock">Entendido</button>
+    </div>
+  </div>
+
   <div id="modalAjusteStock" class="hidden fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-3">
     <div class="bg-white rounded-2xl p-4 max-w-sm w-full max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-2">
         <h2 class="text-lg font-bold text-amber-800">📦 Ajustar existencia</h2>
         <button class="close-modal text-2xl text-gray-400 hover:text-gray-700" data-modal="modalAjusteStock">&times;</button>
       </div>
-      <p class="text-xs text-gray-500 mb-3">Poné el stock actual de cada saco (conteo físico). Desde hoy, el consumo de la caja se resta solo. "mín" = avisar cuando baje de ese número.</p>
+      <p class="text-xs text-gray-500 mb-3">Poné el stock actual de cada saco (conteo físico). Desde hoy, el consumo de la caja se resta solo. <b>"mín"</b> = cuántos sacos deben quedar para que el sistema te avise al entrar (por defecto 20).</p>
       <div class="flex gap-2 text-[10px] text-gray-400 font-bold px-1"><span class="flex-1">Saco</span><span class="w-20 text-center">stock</span><span class="w-16 text-center">mín</span></div>
       <div id="ajusteStockList" class="space-y-2 mt-1"></div>
       <button id="ajusteStockGuardar" class="mt-3 w-full py-3 bg-amber-600 text-white rounded-xl font-bold">Guardar existencia</button>
@@ -977,5 +1003,5 @@
 <div id="toast" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-2xl z-50 text-sm font-medium"></div>
 
 <script type="module" src="app.js"></script>
-<div style='position:fixed;bottom:6px;right:9px;font-size:10px;color:#9aa0a6;opacity:.65;pointer-events:none;z-index:99999'>v2026-07-26.1</div></body>
+<div style='position:fixed;bottom:6px;right:9px;font-size:10px;color:#9aa0a6;opacity:.65;pointer-events:none;z-index:99999'>v2026-07-26.2</div></body>
 </html>

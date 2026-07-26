@@ -600,6 +600,7 @@ async function reload({ preserveExpanded = true } = {}) {
     renderCajaSaldos();
     renderCajaRetiros();
     renderCajaEvolucion();
+    renderAlertaStock();
     updateLastRefreshLabel();
   } catch (e) {
     console.error(e);
@@ -981,6 +982,71 @@ function renderSacosAnalitica() {
   }
 }
 
+// ============================================================
+// Aviso de stock bajo de trigo
+// El minimo lo define el dueno por saco (campo "min" en Ajustar
+// existencia; por defecto 20). La bandera bajo_minimo y los dias
+// de cobertura vienen ya calculados de la vista saco_stock_actual.
+// ============================================================
+let _alertaStockYaMostrada = false;   // el aviso emergente sale una vez por sesion
+
+function sacosBajoMinimo() {
+  return (state.sacoProductos || []).filter(p => {
+    if (p.activo === false) return false;
+    const min = Number(p.stock_min) || 0;
+    if (min <= 0) return false;               // sin minimo definido, no molesta
+    return _stockActual(p) <= min;
+  });
+}
+
+function renderAlertaStock() {
+  const bajos = sacosBajoMinimo();
+  const banner = $("alertaStockBanner");
+  const texto = $("alertaStockBannerTexto");
+
+  if (!bajos.length) {
+    if (banner) banner.classList.add("hidden");
+    return;
+  }
+
+  // Banner permanente: queda visible mientras el stock siga bajo.
+  if (banner && texto) {
+    texto.textContent = bajos
+      .map(p => (p.label || (p.nombre + " " + p.kg + "kg")) + ": quedan " + _stockActual(p) + " (mín " + p.stock_min + ")")
+      .join(" · ");
+    banner.classList.remove("hidden");
+  }
+
+  // Aviso emergente: solo la primera vez que entra al panel.
+  if (_alertaStockYaMostrada) return;
+  _alertaStockYaMostrada = true;
+  abrirAlertaStock();
+}
+
+function abrirAlertaStock() {
+  const bajos = sacosBajoMinimo();
+  if (!bajos.length) { toast("El stock de trigo está bien por ahora"); return; }
+  const cont = $("alertaStockLista");
+  if (!cont) return;
+  cont.innerHTML = bajos.map(p => {
+    const label = p.label || (p.nombre + " " + p.kg + "kg");
+    const stock = _stockActual(p);
+    const dias = p.dias_de_cobertura;
+    const cuanto = stock <= 0
+      ? '<span class="text-red-700 font-bold">sin existencia</span>'
+      : 'quedan <b>' + stock + '</b> ' + (stock === 1 ? 'saco' : 'sacos');
+    const autonomia = (dias != null && Number(dias) > 0)
+      ? '<div class="text-[11px] text-gray-500 mt-0.5">Te alcanza para unos ' + dias + ' días al ritmo actual</div>'
+      : '';
+    return '<div class="border-2 border-red-200 bg-red-50 rounded-xl p-2.5">' +
+      '<div class="font-bold text-sm text-red-800">' + escapeHtml(label) + '</div>' +
+      '<div class="text-xs text-red-700 mt-0.5">' + cuanto + ' · mínimo configurado: ' + p.stock_min + '</div>' +
+      autonomia +
+      '</div>';
+  }).join("");
+  openModal("modalAlertaStock");
+}
+
 // ---- Modales: ajustar existencia / registrar compra ----
 function openAjusteStock() {
   const cont = $("ajusteStockList");
@@ -1236,6 +1302,12 @@ function init() {
   });
 
   $("refreshBtn").addEventListener("click", reload);
+
+  // Aviso de stock bajo: el banner reabre el detalle; el botón lleva a ajustar.
+  const _ab = $("alertaStockBannerBtn");
+  if (_ab) _ab.addEventListener("click", abrirAlertaStock);
+  const _aa = $("alertaStockAjustar");
+  if (_aa) _aa.addEventListener("click", () => { closeModal("modalAlertaStock"); openAjusteStock(); });
 
   document.querySelectorAll(".chart-btn").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -1819,7 +1891,7 @@ function wireModalClose() {
     btn.addEventListener("click", () => closeModal(btn.dataset.modal));
   });
   // click fuera del contenido cierra
-  ["modalCierreCaja", "modalRetiro"].forEach(id => {
+  ["modalCierreCaja", "modalRetiro", "modalAlertaStock"].forEach(id => {
     $(id).addEventListener("click", (e) => {
       if (e.target.id === id) closeModal(id);
     });
