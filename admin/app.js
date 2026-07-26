@@ -629,7 +629,15 @@ function setRango(desde, hasta) {
 // 🌾 Sacos de trigo: reporte de consumo + gestión de catálogo
 // ============================================================
 async function fetchSacoCatalogos() {
-  const { data } = await sb.from("saco_producto").select("*").order("orden");
+  // Se lee de la vista saco_stock_actual: trae los mismos campos del catálogo
+  // MÁS el stock ya calculado en la base de datos sobre el historial completo.
+  // Las escrituras siguen yendo a saco_producto por id (la vista expone id).
+  const { data, error } = await sb.from("saco_stock_actual").select("*").order("orden");
+  if (error) {
+    const r = await sb.from("saco_producto").select("*").order("orden");
+    state.sacoProductos = r.data || [];
+    return;
+  }
   state.sacoProductos = data || [];
 }
 
@@ -700,7 +708,22 @@ function wireSacosRowListeners() {
   });
   document.querySelectorAll(".saco-prod-del").forEach(b => b.onclick = async () => {
     if (!confirm("¿Borrar este saco del catálogo? Los cierres ya guardados conservan su dato.")) return;
-    await sb.from("saco_producto").delete().eq("id", b.dataset.id);
+    const { error } = await sb.from("saco_producto").delete().eq("id", b.dataset.id);
+    if (error) {
+      // La base de datos ahora protege el historial: un saco con consumo o compras
+      // registradas no se puede borrar sin dejar esos registros huérfanos (fue lo
+      // que pasó con "Azul 50kg"). Se ofrece ocultarlo en su lugar.
+      if (error.code === "23503") {
+        if (confirm("Este saco ya tiene consumo o compras registradas, así que no se puede borrar sin romper el historial.\n\n¿Querés ocultarlo? Deja de aparecer en la app pero los registros viejos se conservan.")) {
+          await sb.from("saco_producto").update({ activo: false }).eq("id", b.dataset.id);
+          await fetchSacoCatalogos(); renderSacosAdmin();
+          toast("Saco ocultado");
+        }
+        return;
+      }
+      toast("No se pudo borrar: " + error.message, 4000);
+      return;
+    }
     await fetchSacoCatalogos(); renderSacosAdmin();
     toast("Saco borrado");
   });
@@ -804,6 +827,14 @@ function _stockActual(prod) {
   // El stock_base es el conteo físico a esa fecha (verdad absoluta, ya incluye lo de ese día).
   // Solo los movimientos POSTERIORES (fecha > stock_fecha) ajustan: compras suman, consumo resta.
   // Sin ajuste (stock_fecha null) => cuenta todo el historial desde el inicio.
+  // El stock lo calcula ahora la base de datos (vista saco_stock_actual) sobre el
+  // historial COMPLETO. Antes se sumaba acá con lo que el navegador tenía cargado,
+  // y el consumo solo se pedía de los últimos 190 días mientras las compras se
+  // pedían desde siempre: si el conteo físico quedaba viejo o sin fecha, el consumo
+  // antiguo desaparecía del cálculo y el stock se mostraba INFLADO.
+  if (prod.stock_actual != null) return Number(prod.stock_actual) || 0;
+
+  // Respaldo (solo si la vista no respondió): cálculo local como antes.
   const F = prod.stock_fecha || "0000-01-01";
   const cons = (state.sacoConsumo || [])
     .filter(c => c.tipo === prod.nombre && Number(c.kg) === Number(prod.kg) && c.fecha > F)
