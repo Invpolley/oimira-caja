@@ -95,6 +95,7 @@ function displayIngresoName(nombre) {
 const state = {
   fecha: todayLocalISO(),
   cajera: loadCajera(),
+  deteriorado: 0, // billetes en mal estado apartados para el banco (R$)
   ingresos: [],   // [{nombre, moeda, monto, preset, id?}]
   gastos: [],     // [{descripcion, monto, moeda, categoria, id?}]
   sacos: [],      // [{tipo, kg, cantidad, id?}] — detalle de sacos del día
@@ -607,7 +608,7 @@ async function loadExistingCierre() {
     'USD': 'usd_usd'
   };
   const extras = data.forma_pago_extra || [];
-  { const det = document.getElementById("efectivoDeteriorado"); if (det) det.value = Number(data.efectivo_deteriorado_rs || 0) || ""; }
+  state.deteriorado = Number(data.efectivo_deteriorado_rs || 0);
   state.ingresos = ingresosCatalog.map(fp => {
     let monto = 0, id;
     if (fp.preset && fp.nombre === "Dinheiro") {
@@ -741,6 +742,20 @@ function bindStatic() {
   document.getElementById("observacoes").addEventListener("input", e => {
     state.observacoes = e.target.value; saveDraft();
   });
+
+  // Billetes deteriorados.
+  // Antes este input no tenía listener: el valor no entraba al estado, no se
+  // guardaba en el borrador y cualquier recarga lo borraba. La cajera lo veía
+  // en pantalla pero al enviar el cierre se grababa 0. Por eso el panel del
+  // dueño nunca mostraba nada.
+  const detInput = document.getElementById("efectivoDeteriorado");
+  if (detInput) {
+    detInput.addEventListener("focus", e => e.target.select());
+    detInput.addEventListener("input", e => {
+      state.deteriorado = Number(e.target.value) || 0;
+      saveDraft();
+    });
+  }
 
   // Tasas de cambio del día
   const tasaBs = document.getElementById("tasaBsRs");
@@ -896,7 +911,7 @@ function applyLockState() {
   unlockedBanner.classList.toggle("hidden", !inUnlock);
 
   // Deshabilitar inputs
-  const editables = document.querySelectorAll("#fecha, #sacosTrigo, #tickets, #observacoes, #addIngresoBtn, #addGastoBtn, #addSacoBtn, #ingresosList input, #gastosList input, #gastosList select, #sacosList input, #sacosList select, #ingresosList button, #gastosList button, #enviarBtn, #guardarBtn");
+  const editables = document.querySelectorAll("#fecha, #sacosTrigo, #tickets, #observacoes, #efectivoDeteriorado, #addIngresoBtn, #addGastoBtn, #addSacoBtn, #ingresosList input, #gastosList input, #gastosList select, #sacosList input, #sacosList select, #ingresosList button, #gastosList button, #enviarBtn, #guardarBtn");
   editables.forEach(el => {
     // fecha siempre se puede cambiar (para ver otros días)
     if (el.id === "fecha") return;
@@ -1031,6 +1046,8 @@ function renderAll() {
   document.getElementById("sacosTrigo").value = state.sacosTrigo;
   document.getElementById("tickets").value = state.tickets;
   document.getElementById("observacoes").value = state.observacoes;
+  { const det = document.getElementById("efectivoDeteriorado");
+    if (det) det.value = Number(state.deteriorado) ? state.deteriorado : ""; }
   const tb = document.getElementById("tasaBsRs");
   const tu = document.getElementById("tasaUsdRs");
   if (tb) tb.value = state.tasaBsRs;
@@ -1069,7 +1086,7 @@ async function enviarCierre(transmitir = true) {
       pix_rs: getPreset('PIX'),
       dinheiro_rs: dinheiroRsNeto,              // ⚠ legacy: efectivo neto que queda
       ventas_efectivo_rs: ventasEfectivoRs,      // nuevo: venta efectivo bruta
-      efectivo_deteriorado_rs: Number(document.getElementById("efectivoDeteriorado")?.value || 0), // billetes en mal estado (para banco)
+      efectivo_deteriorado_rs: Number(state.deteriorado) || 0, // billetes en mal estado (para banco)
       debito_rs: getPreset('Débito POS'),
       pago_movil_bs: getPreset('Pago Móvil'),
       bs_efectivo_bs: getPreset('Bs efectivo'),
