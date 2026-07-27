@@ -306,7 +306,7 @@
     </div>
 
     <!-- Cards por canal (7 canales en grid responsive) -->
-    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
       <!-- Efectivo R$ -->
       <div class="kpi border-green-400" id="cardCanalEfectivo">
         <div class="kpi-label" id="lblCanalEfectivo">💵 Efectivo R$</div>
@@ -349,6 +349,13 @@
         <div class="kpi-value mono text-emerald-700" id="cajaUsd">US$ 0</div>
         <div class="text-[10px] text-gray-500 mt-1" id="cajaUsdDetail"></div>
       </div>
+      <!-- Billetes deteriorados: al lado del USD, debajo de Bs efectivo -->
+      <div class="kpi border-rose-400" id="cardDeteriorado" style="display:none"
+           title="Billetes en mal estado que se apartan para el banco. Ya están incluidos en el saldo de efectivo. Se descuentan registrando un retiro de Efectivo con motivo &quot;Depósito billetes deteriorados&quot;.">
+        <div class="kpi-label" style="color:#9f1239">🩹 Deteriorados</div>
+        <div class="kpi-value mono text-rose-700" id="detTotal">R$ 0,00</div>
+        <div class="text-[10px] text-gray-500 mt-1" id="detDetalle"></div>
+      </div>
     </div>
 
     <!-- Total general -->
@@ -372,18 +379,6 @@
   </div>
 
   <!-- ============================== -->
-  <!-- 🩹 Fondo de billetes deteriorados -->
-  <div class="bg-white rounded-xl p-3 card border-l-4 border-rose-400 mb-3" id="cardDeteriorado" style="display:none">
-    <div class="flex items-center justify-between">
-      <div>
-        <div class="text-sm font-bold text-rose-800">🩹 Billetes deteriorados (para depositar)</div>
-        <div class="text-[11px] text-gray-500" id="detDetalle">—</div>
-      </div>
-      <div class="text-xl mono font-black text-rose-900" id="detTotal">R$ 0,00</div>
-    </div>
-    <p class="text-[10px] text-gray-500 mt-1">Se descuenta con un retiro Efectivo motivo “Depósito billetes deteriorados”. Este dinero ya está incluido en el saldo de efectivo.</p>
-  </div>
-
   <!-- 📈 Evolución por canal          -->
   <!-- ============================== -->
   <div class="bg-white rounded-xl p-3 card">
@@ -1003,5 +998,5 @@
 <div id="toast" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-2xl z-50 text-sm font-medium"></div>
 
 <script type="module" src="app.js"></script>
-<div style='position:fixed;bottom:6px;right:9px;font-size:10px;color:#9aa0a6;opacity:.65;pointer-events:none;z-index:99999'>v2026-07-27.4</div></body>
+<div style='position:fixed;bottom:6px;right:9px;font-size:10px;color:#9aa0a6;opacity:.65;pointer-events:none;z-index:99999'>v2026-07-27.5</div></body>
 </html>

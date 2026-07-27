@@ -1,7 +1,7 @@
 // Service Worker para OiMira Admin — cache + offline support
 // ⚠ Subir SW_VERSION en CADA despliegue. Si este archivo no cambia,
 // el navegador no detecta versión nueva y los celulares quedan pegados.
-const SW_VERSION = "2026-07-27.4";
+const SW_VERSION = "2026-07-27.5";
 const CACHE_NAME = "oimira-admin-" + SW_VERSION;
 // Solo archivos propios. Los CDN se cachean solos cuando se piden:
 // precargarlos acá hacía lenta la instalación y demoraba la actualización.
