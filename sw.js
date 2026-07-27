@@ -1,5 +1,10 @@
 // Service Worker para OiMira Caja — cache + offline support
-const CACHE_NAME = "oimira-caja-v22";
+// ⚠ Subir SW_VERSION en CADA despliegue. Si este archivo no cambia,
+// el navegador no detecta versión nueva y los celulares quedan pegados.
+const SW_VERSION = "2026-07-27.2";
+const CACHE_NAME = "oimira-caja-" + SW_VERSION;
+// Solo archivos propios. Los CDN se cachean solos cuando se piden:
+// precargarlos acá hacía lenta la instalación y demoraba la actualización.
 const ASSETS = [
   "./",
   "./index.html",
@@ -8,8 +13,6 @@ const ASSETS = [
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
-  "https://cdn.tailwindcss.com",
-  "https://esm.sh/@supabase/supabase-js@2",
 ];
 
 self.addEventListener("install", (e) => {
@@ -47,10 +50,24 @@ self.addEventListener("fetch", (e) => {
   }
   // Archivos propios (index.html, app.js, config.js...): NETWORK-FIRST.
   // Trae siempre lo más nuevo; cae al caché solo si no hay conexión.
+  // OJO: a una petición de navegación NO se le puede cambiar el modo de caché
+  // (fetch(request, {cache:...}) tira TypeError y la página queda en blanco).
+  // Por eso el no-store se aplica solo a los archivos, no a la navegación.
+  const esNavegacion = e.request.mode === "navigate";
+  const pedido = esNavegacion
+    ? fetch(e.request)
+    : fetch(new Request(e.request.url, { cache: "no-store", credentials: "same-origin" }));
+
   e.respondWith(
-    fetch(e.request).then(r => {
+    pedido.then(r => {
       if (r && r.ok) { const cp = r.clone(); caches.open(CACHE_NAME).then(c => c.put(e.request, cp)); }
       return r;
-    }).catch(() => caches.match(e.request).then(c => c || (e.request.mode === "navigate" ? caches.match("./index.html") : undefined)))
+    }).catch(() => caches.match(e.request).then(c => c || (esNavegacion ? caches.match("./index.html") : undefined)))
   );
+});
+
+// La app puede preguntar qué versión corre y forzar la activación inmediata.
+self.addEventListener("message", (e) => {
+  if (e.data === "SKIP_WAITING") self.skipWaiting();
+  if (e.data === "VERSION" && e.source) e.source.postMessage({ swVersion: SW_VERSION });
 });

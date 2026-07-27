@@ -1308,27 +1308,67 @@ window.addEventListener("appinstalled", () => {
 })();
 
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const APP_BUILD = "2026-07-22 · c21";
+const APP_BUILD = "2026-07-27.2";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
 
-// Registrar Service Worker
+// ============================================================================
+// Actualizaciones
+// Problema que esto resuelve: antes el service worker solo se renovaba si el
+// archivo sw.js cambiaba, y el sello de versión vivía en dos lugares distintos
+// que se contradecían. Resultado: celulares con código viejo mostrando una
+// versión y otra corriendo.
+//   - se pide sw.js sin pasar por la caché del navegador (updateViaCache none)
+//   - se revisa si hay versión nueva al abrir, al volver a la app y cada 5 min
+//   - si la app estaba en segundo plano, se actualiza sola
+//   - si la cajera está trabajando, aparece un aviso para tocar (no la interrumpe)
+//   - se compara la versión del código con la del service worker y se avisa si no coinciden
+// ============================================================================
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js").then(reg => {
-    // Forzar check de update inmediato (sin esto, el browser revisa el SW cada 24h)
-    try { reg.update(); } catch {}
+  let recargando = false;
+  const recargar = () => { if (!recargando) { recargando = true; window.location.reload(); } };
 
-    // Detectar instalación de nueva versión y auto-recargar para que tome efecto
+  function avisarNuevaVersion(reg) {
+    // Si la app no está a la vista, actualizar sin molestar.
+    if (document.visibilityState !== "visible") return recargar();
+    if (document.getElementById("swUpdateBar")) return;
+    const bar = document.createElement("button");
+    bar.id = "swUpdateBar";
+    bar.textContent = "🔄 Nueva versión lista — tocá para actualizar";
+    bar.setAttribute("style",
+      "position:fixed;left:0;right:0;bottom:0;z-index:99998;border:0;padding:14px;" +
+      "background:#16a34a;color:#fff;font-weight:700;font-size:14px;box-shadow:0 -2px 12px rgba(0,0,0,.25)");
+    bar.onclick = () => { if (reg && reg.waiting) reg.waiting.postMessage("SKIP_WAITING"); recargar(); };
+    document.body.appendChild(bar);
+  }
+
+  navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then(reg => {
+    const buscar = () => { try { reg.update(); } catch {} };
+    buscar();
+    setInterval(buscar, 5 * 60 * 1000);
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") buscar(); });
+
     reg.addEventListener("updatefound", () => {
       const nw = reg.installing;
       if (!nw) return;
       nw.addEventListener("statechange", () => {
-        // Solo recargar si ya había un SW controlando (ie. el celu ya tenía la app),
-        // para evitar reload infinito en la primera instalación.
-        if (nw.state === "activated" && navigator.serviceWorker.controller) {
-          console.log("[SW] Nueva versión instalada — recargando…");
-          window.location.reload();
+        if ((nw.state === "installed" || nw.state === "activated") && navigator.serviceWorker.controller) {
+          avisarNuevaVersion(reg);
         }
       });
     });
+
+    // Chequeo de coherencia: el código y el service worker deben ser la misma versión.
+    navigator.serviceWorker.addEventListener("message", (ev) => {
+      const v = ev.data && ev.data.swVersion;
+      if (v && v !== APP_BUILD) {
+        console.warn(`[SW] Descalce de versiones — código ${APP_BUILD} / service worker ${v}`);
+        const e = document.getElementById("appVersion");
+        if (e) e.textContent = `🥖 Caja · v${APP_BUILD} ⚠ sw ${v}`;
+        buscar();
+      }
+    });
+    if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage("VERSION");
   }).catch(err => console.warn("SW fail:", err));
+
+  navigator.serviceWorker.addEventListener("controllerchange", recargar);
 }
