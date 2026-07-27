@@ -1481,7 +1481,7 @@ function wireCodigoListeners() {
 // sw.js debe cambiar en CADA despliegue (su SW_VERSION nombra la cache);
 // si no cambia, el navegador no detecta version nueva y el panel queda pegado.
 // ============================================================
-const APP_BUILD = "2026-07-27.5";
+const APP_BUILD = "2026-07-27.6";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
@@ -1916,8 +1916,34 @@ function drawSparkline(key, cfg, data) {
 }
 
 // ------------- Modal helpers -------------
-function openModal(id) { $(id).classList.remove("hidden"); }
-function closeModal(id) { $(id).classList.add("hidden"); }
+// Los modales registran una entrada en el historial para que el gesto de
+// "volver" del celular cierre el modal en vez de sacarte de la app al hub.
+const MODALES_ABIERTOS = [];
+let _ignorarPop = 0;
+
+function openModal(id) {
+  const el = $(id); if (!el) return;
+  el.classList.remove("hidden");
+  if (MODALES_ABIERTOS.includes(id)) return;
+  MODALES_ABIERTOS.push(id);
+  try { history.pushState({ modalOiMira: id }, ""); } catch {}
+}
+
+function closeModal(id) {
+  const el = $(id); if (el) el.classList.add("hidden");
+  const i = MODALES_ABIERTOS.lastIndexOf(id);
+  if (i === -1) return;
+  MODALES_ABIERTOS.splice(i, 1);
+  // Consumir la entrada que agregamos al abrir, sin que se cierre otro modal.
+  _ignorarPop++;
+  try { history.back(); } catch { _ignorarPop--; }
+}
+
+window.addEventListener("popstate", () => {
+  if (_ignorarPop > 0) { _ignorarPop--; return; }
+  const id = MODALES_ABIERTOS.pop();
+  if (id) { const el = $(id); if (el) el.classList.add("hidden"); }
+});
 
 function wireModalClose() {
   document.querySelectorAll(".close-modal").forEach(btn => {

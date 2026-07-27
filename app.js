@@ -998,6 +998,31 @@ async function submitUnlockCode() {
 // ============================================================
 // Modal de confirmación de envío
 // ============================================================
+// Protección al volver: en la app de caja la pantalla ES el cierre, así que el
+// gesto de "volver" del celular sacaba a la cajera directo al hub, a veces con
+// el cierre a medio cargar. Ahora pregunta antes de salir.
+(function protegerSalida(){
+  let saliendo = false;
+  try { history.pushState({ cajaOiMira: 1 }, ""); } catch { return; }
+  window.addEventListener("popstate", () => {
+    if (saliendo) return;
+    // Si hay algo cargado sin transmitir, avisar. Si está vacío, dejar salir.
+    const hayDatos = (state.ingresos || []).some(i => Number(i.monto) > 0)
+      || (state.gastos || []).length > 0
+      || (state.sacos || []).length > 0
+      || Number(state.deteriorado) > 0
+      || Number(state.tickets) > 0;
+    const cerrado = !!state.transmittedAt;
+    if (!hayDatos || cerrado) { saliendo = true; history.back(); return; }
+    if (confirm("¿Salir del cierre?\n\nLo cargado queda guardado como borrador en este teléfono, pero no se envía.")) {
+      saliendo = true;
+      history.back();
+    } else {
+      try { history.pushState({ cajaOiMira: 1 }, ""); } catch {}
+    }
+  });
+})();
+
 function openConfirmModal() {
   // Reset del guard de doble-click cada vez que se abre el modal
   const _confBtn = document.getElementById("conf_enviar");
@@ -1308,7 +1333,7 @@ window.addEventListener("appinstalled", () => {
 })();
 
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const APP_BUILD = "2026-07-27.5";
+const APP_BUILD = "2026-07-27.6";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
 
 // ============================================================================
