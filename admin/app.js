@@ -1481,8 +1481,7 @@ function wireCodigoListeners() {
 // sw.js debe cambiar en CADA despliegue (su SW_VERSION nombra la cache);
 // si no cambia, el navegador no detecta version nueva y el panel queda pegado.
 // ============================================================
-const APP_BUILD = "2026-07-27.3";
-(function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "📊 Admin · v" + APP_BUILD; })();
+const APP_BUILD = "2026-07-27.4";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
@@ -2602,6 +2601,12 @@ async function renderDeteriorado() {
   } catch (e) { console.error("renderDeteriorado", e); }
 }
 
-const ADMIN_BUILD = "2026-07-22 · a23";
-(function(){ const e = document.getElementById("adminVersion"); if (e) e.textContent = "📊 Admin · v" + ADMIN_BUILD; })();
+// Sello visible. Usa la MISMA constante que el service worker para que no puedan
+// contradecirse: era justo el bug que hacía parecer que la app no se actualizaba.
+(function(){
+  ["adminVersion", "appVersion"].forEach(id => {
+    const e = document.getElementById(id);
+    if (e) e.textContent = "📊 Admin · v" + APP_BUILD;
+  });
+})();
 setupPinGate();

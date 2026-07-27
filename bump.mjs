@@ -11,6 +11,9 @@ import fs from 'node:fs';
 
 const ARCHIVOS = ['sw.js','app.js','index.html','admin/sw.js','admin/app.js','admin/index.html'];
 const RE = /2026-\d{2}-\d{2}\.\d+/g;
+// Sellos con el formato viejo ("2026-07-22 · a23") que quedaban sueltos y
+// contradecían al resto. Si aparece alguno, el script falla.
+const RE_VIEJO = /2026-\d{2}-\d{2}\s*·\s*[a-z]\d+/gi;
 const nueva = process.argv[2];
 
 if (nueva && !/^2026-\d{2}-\d{2}\.\d+$/.test(nueva)) {
@@ -24,6 +27,11 @@ const encontradas = {};
 for (const f of ARCHIVOS) {
   if (!fs.existsSync(f)) { console.error(`  ✗ falta ${f}`); fallo = true; continue; }
   let s = fs.readFileSync(f, 'utf8');
+  const viejos = [...new Set(s.match(RE_VIEJO) || [])];
+  if (viejos.length) {
+    console.error(`  ✗ ${f}: sello con formato viejo -> ${viejos.join(', ')}  (unificalo a AAAA-MM-DD.N)`);
+    fallo = true;
+  }
   const vs = [...new Set(s.match(RE) || [])];
   if (!vs.length) { console.error(`  ✗ ${f}: no tiene sello de versión`); fallo = true; continue; }
   if (nueva) {
