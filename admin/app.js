@@ -1481,7 +1481,7 @@ function wireCodigoListeners() {
 // sw.js debe cambiar en CADA despliegue (su SW_VERSION nombra la cache);
 // si no cambia, el navegador no detecta version nueva y el panel queda pegado.
 // ============================================================
-const APP_BUILD = "2026-07-27.2";
+const APP_BUILD = "2026-07-27.3";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "📊 Admin · v" + APP_BUILD; })();
 
 if ("serviceWorker" in navigator) {
