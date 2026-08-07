@@ -9,4 +9,4 @@ export const SUPABASE_ANON_KEY = "sb_publishable_Af20dNnlmYwC4n_xLfkYGg_WsxyWApK
 // PIN de admin (cambialo cuando quieras — es solo protección básica)
 // No es seguridad real (el JS es público), sino una barrera para que
 // la cajera u otros no entren por accidente.
-export const ADMIN_PIN = "2468";
+export const ADMIN_PIN = "197319";
