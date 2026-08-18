@@ -1055,8 +1055,8 @@ function openAjusteStock() {
     const stock = _stockActual(p);
     return '<div class="flex items-center gap-2 text-sm">' +
       '<span class="flex-1">' + escapeHtml(label) + (stock != null ? ' <span class="text-gray-400">(hoy ' + stock + ')</span>' : '') + '</span>' +
-      '<input type="number" min="0" step="1" class="ajuste-stock w-20 p-1.5 border-2 border-gray-300 rounded text-center" data-id="' + p.id + '" placeholder="stock" value="' + (p.stock_base != null ? p.stock_base : '') + '"/>' +
-      '<input type="number" min="0" step="1" class="ajuste-min w-16 p-1.5 border-2 border-gray-200 rounded text-center" data-id="' + p.id + '" placeholder="mín" value="' + (p.stock_min != null ? p.stock_min : '') + '"/>' +
+      '<input type="number" min="0" step="1" class="ajuste-stock w-20 p-1.5 border-2 border-gray-300 rounded text-center" data-id="' + p.id + '" placeholder="sin cambio"/>' +
+      '<input type="number" min="0" step="1" class="ajuste-min w-16 p-1.5 border-2 border-gray-200 rounded text-center" data-id="' + p.id + '" placeholder="mín ' + (p.stock_min != null ? p.stock_min : '—') + '"/>' +
       '</div>';
   }).join("");
   openModal("modalAjusteStock");
@@ -1075,7 +1075,7 @@ async function guardarAjusteStock() {
   });
   for (const u of ups) await sb.from("saco_producto").update(u.patch).eq("id", u.id);
   closeModal("modalAjusteStock");
-  toast("Existencia actualizada");
+  toast("Existencia actualizada (solo los productos que escribiste)");
   reload();
 }
 function openCompra() {
