@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, ADMIN_PIN } from "./config.js";
 
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { db: { schema: "oimira_caja" } });
+const sbPagos = createClient(SUPABASE_URL, SUPABASE_ANON_KEY); // schema public — app OiMira Pagos
 
 // ============================================================
 // Estado
@@ -1481,7 +1482,52 @@ function wireCodigoListeners() {
 // sw.js debe cambiar en CADA despliegue (su SW_VERSION nombra la cache);
 // si no cambia, el navegador no detecta version nueva y el panel queda pegado.
 // ============================================================
-const APP_BUILD = "2026-07-27.6";
+
+/* ===== Interconexion con OiMira Pagos ===== */
+let VINCULOS_PAGOS = [];
+async function cargarVinculosPagos(moeda) {
+  const sel = $("rt_vinculo");
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— No vincular —</option>';
+  VINCULOS_PAGOS = [];
+  try {
+    const [rf, rc] = await Promise.all([
+      sbPagos.from("pago_factura_saldo").select("id,titulo,proveedor,saldo,vence").eq("estado", "pendiente").eq("moeda", moeda).gt("saldo", 0).order("vence"),
+      sbPagos.from("pago_credito_saldo").select("id,proveedor,descripcion,saldo").eq("cerrado", false).eq("moeda", moeda).gt("saldo", 0),
+    ]);
+    (rf.data || []).forEach(f => {
+      VINCULOS_PAGOS.push({ key: "f:" + f.id, saldo: f.saldo, nombre: f.titulo });
+      sel.insertAdjacentHTML("beforeend", `<option value="f:${f.id}">🧾 Factura: ${escapeHtml(f.titulo)}${f.proveedor ? " · " + escapeHtml(f.proveedor) : ""} — saldo ${fmtMoeda(f.saldo, moeda)}</option>`);
+    });
+    (rc.data || []).forEach(c => {
+      VINCULOS_PAGOS.push({ key: "c:" + c.id, saldo: c.saldo, nombre: c.proveedor });
+      sel.insertAdjacentHTML("beforeend", `<option value="c:${c.id}">🤝 Crédito: ${escapeHtml(c.proveedor)} — saldo ${fmtMoeda(c.saldo, moeda)}</option>`);
+    });
+  } catch (e) { console.error("vinculos pagos", e); }
+}
+
+// Aviso de pagos por vencer (1 dia de antelacion) al abrir el panel
+(async function avisoPagosPanel() {
+  try {
+    function hoyVE(){ return new Date(Date.now() - 14400000).toISOString().slice(0, 10); }
+    const hoy = hoyVE();
+    const man = (function(){ const d = new Date(hoy + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
+    const { data: rows } = await sbPagos.from("pago_factura_saldo").select("titulo,saldo,moeda,vence").eq("estado", "pendiente").lte("vence", man).order("vence");
+    if (!rows || !rows.length) return;
+    const venc = rows.filter(p => p.vence < hoy).length, dHoy = rows.filter(p => p.vence === hoy).length, dMan = rows.filter(p => p.vence === man).length;
+    const partes = [];
+    if (venc) partes.push("⛔ " + venc + " vencido" + (venc > 1 ? "s" : ""));
+    if (dHoy) partes.push("📌 " + dHoy + " HOY");
+    if (dMan) partes.push("⏰ " + dMan + " mañana");
+    const grave = venc || dHoy;
+    const det = rows.slice(0, 3).map(p => p.titulo + " (" + p.moeda + " " + Number(p.saldo).toFixed(2) + ")").join(" · ");
+    document.body.insertAdjacentHTML("afterbegin",
+      `<div onclick="window.open('https://invpolley.github.io/oimira-pagos/','_blank')" style="cursor:pointer;margin:8px 10px;padding:10px 14px;border-radius:12px;font-size:13px;border:1px solid ${grave ? "#f87171" : "#fbbf24"};background:${grave ? "#fef2f2" : "#fffbeb"};color:${grave ? "#991b1b" : "#92400e"}">` +
+      `<b>💳 Pagos por atender:</b> ${partes.join(" · ")}<br><span style="opacity:.8;font-size:11.5px">${det}${rows.length > 3 ? " · +" + (rows.length - 3) + " más" : ""} — toca para abrir OiMira Pagos</span></div>`);
+  } catch (e) { /* sin conexion: no molestar */ }
+})();
+
+const APP_BUILD = "2026-08-22.1";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
@@ -2311,6 +2357,7 @@ function selectMoeda(moeda) {
   });
 
   $("rt_montoMoedaLabel").textContent = "Monto en " + moeda;
+  cargarVinculosPagos(moeda);
 
   // Renderizar canales disponibles para esta moneda
   const cont = $("rt_canalOptions");
@@ -2473,8 +2520,33 @@ async function guardarRetiro() {
     nota,
   };
 
-  const { error } = await sb.from("caja_retiro").insert(payload);
+  // Vinculo con OiMira Pagos: validar ANTES de guardar
+  const vincSel = $("rt_vinculo") ? $("rt_vinculo").value : "";
+  if (vincSel) {
+    const it = (VINCULOS_PAGOS || []).find(v => v.key === vincSel);
+    if (it && monto > Number(it.saldo)) {
+      toast(`⛔ El retiro (${fmtMoeda(monto, moeda)}) es mayor que el saldo de "${it.nombre}" (${fmtMoeda(it.saldo, moeda)}). Ajusta el monto o quita el vínculo.`, 5000);
+      return;
+    }
+  }
+
+  const { data: retIns, error } = await sb.from("caja_retiro").insert(payload).select("id").single();
   if (error) { toast("Error: " + error.message, 4000); return; }
+
+  // Registrar el pago/abono en OiMira Pagos
+  if (vincSel && retIns) {
+    const tipo = vincSel.slice(0, 1), pid = vincSel.slice(2);
+    const rpcName = tipo === "f" ? "pago_abonar_factura" : "pago_abonar_credito";
+    const args = tipo === "f"
+      ? { p_factura: pid, p_monto: monto, p_nota: "Retiro caja: " + nota, p_retiro: retIns.id }
+      : { p_credito: pid, p_monto: monto, p_nota: "Retiro caja: " + nota, p_retiro: retIns.id };
+    const rp = await sbPagos.rpc(rpcName, args);
+    if (rp.error) toast("Retiro guardado, pero el vínculo con Pagos falló: " + rp.error.message, 5000);
+    else {
+      const d = rp.data || {};
+      toast(d.pagada ? "💳 Factura marcada PAGADA en OiMira Pagos" : "💳 Abono registrado en OiMira Pagos (saldo " + fmtMoeda(d.saldo, moeda) + ")", 4500);
+    }
+  }
 
   // Si el retiro está vinculado a un cierre, propagar el saldo recalculado
   // al día siguiente automáticamente.
