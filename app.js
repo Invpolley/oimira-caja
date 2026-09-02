@@ -347,6 +347,8 @@ function calcSacos(sacos) {
 function updateSacosResumen() {
   const { totalSacos, totalKg } = calcSacos(state.sacos);
   state.sacosTrigo = totalSacos; // mantener total derivado para compat
+  const avS = document.getElementById("sacosAviso");
+  if (avS && totalSacos > 0) avS.classList.add("hidden");
   const hidden = document.getElementById("sacosTrigo");
   if (hidden) hidden.value = totalSacos;
   const res = document.getElementById("sacosResumen");
@@ -1036,6 +1038,26 @@ function openConfirmModal() {
     toast("⚠️ No hay datos para cerrar");
     return;
   }
+  // 🌾 TRIGO OBLIGATORIO: sin sacos del día no se puede cerrar
+  const { totalSacos } = calcSacos(state.sacos);
+  if (!(totalSacos > 0)) {
+    const av = document.getElementById("sacosAviso");
+    if (av) av.classList.remove("hidden");
+    document.getElementById("sacosList")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    alert("🌾 FALTA EL TRIGO\n\nNo se puede cerrar el día sin registrar los sacos de trigo que se hicieron hoy.\n\nAgregá el tipo de saco y la cantidad en la sección 🌾 Sacos de trigo y volvé a enviar.");
+    return;
+  }
+  // 🏧 Puntos de venta en 0: solo recordatorio (no bloquea)
+  const pdvCero = state.ingresos
+    .filter(i => i.preset && ["PIX", "Débito POS", "Pago Móvil"].includes(i.nombre) && !(Number(i.monto) > 0))
+    .map(i => i.label || i.nombre);
+  const pdvEl = document.getElementById("conf_pdv");
+  if (pdvEl) {
+    if (pdvCero.length) {
+      pdvEl.textContent = "⚠️ Puntos de venta en 0: " + pdvCero.join(", ") + ". Si hubo ventas por ahí, cancelá y cargalas.";
+      pdvEl.classList.remove("hidden");
+    } else pdvEl.classList.add("hidden");
+  }
 
   const sumR = state.ingresos.filter(i => i.moeda === "R$").reduce((s, i) => s + (Number(i.monto) || 0), 0);
   const sumB = state.ingresos.filter(i => i.moeda === "Bs").reduce((s, i) => s + (Number(i.monto) || 0), 0);
@@ -1333,7 +1355,7 @@ window.addEventListener("appinstalled", () => {
 })();
 
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const APP_BUILD = "2026-07-27.6";
+const APP_BUILD = "2026-09-02.1";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
 
 // ============================================================================
