@@ -131,9 +131,25 @@
   .offline-dot { background: #ef4444; }
   .syncing-dot { background: #eab308; animation: pulse 1s infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* PWA-RESILIENTE: servidor caído / sin internet */
+  .srv-banner{position:sticky;top:0;z-index:19;display:flex;gap:10px;align-items:flex-start;background:#3a2b1e;border-bottom:2px solid #f59e0b;color:#f8e3c3;padding:10px 14px;font-size:12.5px;line-height:1.45}
+  .srv-banner.oculto{display:none}
+  .srv-banner .ico{font-size:20px;line-height:1}
+  .srv-banner b{color:#fbbf24}
+  .net-banner{position:sticky;top:0;z-index:19;background:#1e293b;color:#e2e8f0;padding:8px 14px;font-size:12.5px;text-align:center;line-height:1.4}
+  .net-banner.oculto{display:none}
 </style>
 </head>
 <body class="pb-24">
+<!-- PWA-RESILIENTE: banners -->
+<div id="netBanner" class="net-banner oculto">📵 <b>Sin internet.</b> Puedes seguir usando la app: lo que hagas se guarda en este equipo y se envía cuando vuelva la señal.</div>
+<div id="srvBanner" class="srv-banner oculto">
+  <span class="ico">⚠️</span>
+  <div><b>El servidor de la app no responde en este momento.</b><br>
+  Estás usando la última versión guardada en este equipo. <b>Puedes seguir trabajando:</b> los datos se guardan y se envían solos cuando el servidor vuelva.</div>
+</div>
+
 
 <!-- Header -->
 <header class="bg-gradient-to-r from-amber-600 to-orange-500 text-white p-4 shadow-lg sticky top-0 z-20">
@@ -499,5 +515,22 @@
 <div id="toast" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-2xl z-50 text-sm font-medium max-w-xs"></div>
 
 <script type="module" src="app.js"></script>
-<div style='position:fixed;bottom:6px;right:9px;font-size:10px;color:#9aa0a6;opacity:.65;pointer-events:none;z-index:99999'>v2026-09-02.1</div></body>
+<div style='position:fixed;bottom:6px;right:9px;font-size:10px;color:#9aa0a6;opacity:.65;pointer-events:none;z-index:99999'>v2026-09-13.1</div>
+<script>
+/* PWA-RESILIENTE: ping al hosting (el SW deja pasar ?ping=) + estado de red */
+(function(){
+  function pintarRed(){ var b=document.getElementById("netBanner"); if(b) b.classList.toggle("oculto", navigator.onLine); }
+  async function pingServidor(){
+    var b=document.getElementById("srvBanner"); if(!b) return;
+    try{ var r=await fetch("./manifest.json"+"?ping="+Date.now(),{cache:"no-store"}); b.classList.toggle("oculto", r.ok); }
+    catch(e){ b.classList.add("oculto"); }
+  }
+  window.addEventListener("online", function(){ pintarRed(); pingServidor(); });
+  window.addEventListener("offline", pintarRed);
+  document.addEventListener("visibilitychange", function(){ if(!document.hidden){ pintarRed(); pingServidor(); } });
+  setInterval(pingServidor, 60000);
+  pintarRed(); pingServidor();
+})();
+</script>
+</body>
 </html>

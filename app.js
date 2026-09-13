@@ -1355,7 +1355,7 @@ window.addEventListener("appinstalled", () => {
 })();
 
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const APP_BUILD = "2026-09-02.1";
+const APP_BUILD = "2026-09-13.1";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
 
 // ============================================================================
