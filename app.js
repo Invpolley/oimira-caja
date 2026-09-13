@@ -1150,70 +1150,28 @@ async function enviarCierre(transmitir = true) {
       cierrePayload.transmitted_at = new Date().toISOString();
     }
 
-    let cierreId = state.cierreId;
+    // Paquete completo del cierre (independiente de `state`, para poder reenviarlo solo más tarde)
+    const paquete = {
+      fecha: state.fecha,
+      cierreId: state.cierreId || null,
+      transmitir,
+      cierrePayload,
+      extras: state.ingresos.filter(i => !i.preset && i.monto > 0)
+        .map(i => ({ nombre: i.nombre, moeda: i.moeda, monto: i.monto })),
+      gastos: state.gastos.filter(g => g.descripcion && g.monto > 0)
+        .map(g => ({ descripcion: g.descripcion, categoria: g.categoria, monto: g.monto, moeda: g.moeda })),
+      sacos: (state.sacos || []).filter(s => (parseInt(s.cantidad) || 0) > 0)
+        .map(s => ({ tipo: s.tipo, kg: Number(s.kg) || 0, cantidad: parseInt(s.cantidad) || 0 })),
+      creado: new Date().toISOString(),
+    };
+    ULTIMO_PAQUETE = paquete;
 
-    if (cierreId) {
-      // Update
-      const { error } = await supabase.from('dia_cierre').update(cierrePayload).eq('id', cierreId);
-      if (error) throw error;
-    } else {
-      // Insert (o upsert por fecha)
-      const { data, error } = await supabase.from('dia_cierre')
-        .upsert(cierrePayload, { onConflict: 'fecha' })
-        .select()
-        .single();
-      if (error) throw error;
-      cierreId = data.id;
-      state.cierreId = cierreId;
-    }
+    // Sin señal: no intentar, guardar en cola y avisar con calma
+    if (!navigator.onLine) { colaCierreGuardar(paquete); avisoCierrePendiente(paquete); return; }
 
-    // Borrar formas de pago extra existentes + gastos, luego reinsertar
-    await supabase.from('forma_pago_extra').delete().eq('dia_cierre_id', cierreId);
-    await supabase.from('dia_gasto').delete().eq('dia_cierre_id', cierreId);
-    await supabase.from('dia_saco').delete().eq('dia_cierre_id', cierreId);
-
-    // Insert formas de pago extra (custom, no preset)
-    const extras = state.ingresos
-      .filter(i => !i.preset && i.monto > 0)
-      .map(i => ({
-        dia_cierre_id: cierreId,
-        nombre: i.nombre,
-        moeda: i.moeda,
-        monto: i.monto,
-      }));
-    if (extras.length > 0) {
-      const { error: e2 } = await supabase.from('forma_pago_extra').insert(extras);
-      if (e2) throw e2;
-    }
-
-    // Insert gastos
-    const gastos = state.gastos
-      .filter(g => g.descripcion && g.monto > 0)
-      .map(g => ({
-        dia_cierre_id: cierreId,
-        descripcion: g.descripcion,
-        categoria: g.categoria,
-        monto: g.monto,
-        moeda: g.moeda,
-      }));
-    if (gastos.length > 0) {
-      const { error: e3 } = await supabase.from('dia_gasto').insert(gastos);
-      if (e3) throw e3;
-    }
-
-    // Insert sacos detallados (solo filas con cantidad > 0)
-    const sacos = (state.sacos || [])
-      .filter(s => (parseInt(s.cantidad) || 0) > 0)
-      .map(s => ({
-        dia_cierre_id: cierreId,
-        tipo: s.tipo,
-        kg: Number(s.kg) || 0,
-        cantidad: parseInt(s.cantidad) || 0,
-      }));
-    if (sacos.length > 0) {
-      const { error: e4 } = await supabase.from('dia_saco').insert(sacos);
-      if (e4) throw e4;
-    }
+    const cierreId = await conTope(persistirCierre(paquete), 12000);
+    state.cierreId = cierreId;
+    colaCierreQuitar(paquete.fecha);
 
     if (transmitir) {
       state.transmittedAt = cierrePayload.transmitted_at;
@@ -1227,7 +1185,12 @@ async function enviarCierre(transmitir = true) {
 
   } catch (err) {
     console.error(err);
-    toast("❌ Error: " + (err.message || err) + " — Guardado localmente, reintentar con internet");
+    if (esErrorDeRed(err) && ULTIMO_PAQUETE && ULTIMO_PAQUETE.fecha === state.fecha) {
+      // Señal caída o servidor sin responder: queda en cola y se reenvía solo
+      colaCierreGuardar(ULTIMO_PAQUETE); avisoCierrePendiente(ULTIMO_PAQUETE);
+    } else {
+      toast("❌ Error: " + (err.message || err) + " — Guardado localmente, reintentar con internet");
+    }
     updateStatus();
   } finally {
     // No tocar el botón directamente: applyLockState decide el texto/disable
@@ -1236,6 +1199,105 @@ async function enviarCierre(transmitir = true) {
     applyLockState();
   }
 }
+
+// ============================================================================
+// Cola de cierres pendientes (sin señal / servidor caído) — se reenvían solos
+// ============================================================================
+let ULTIMO_PAQUETE = null;
+const COLA_CIERRE_KEY = "caja_cola_cierres_v1";
+
+// Escribe en Supabase el paquete completo del cierre. Idempotente: upsert por fecha + borrar/reinsertar hijos.
+async function persistirCierre(p) {
+  let cierreId = p.cierreId;
+  if (cierreId) {
+    const { error } = await supabase.from('dia_cierre').update(p.cierrePayload).eq('id', cierreId);
+    if (error) throw error;
+  } else {
+    const { data, error } = await supabase.from('dia_cierre')
+      .upsert(p.cierrePayload, { onConflict: 'fecha' })
+      .select()
+      .single();
+    if (error) throw error;
+    cierreId = data.id;
+  }
+  for (const t of ['forma_pago_extra', 'dia_gasto', 'dia_saco']) {
+    const { error } = await supabase.from(t).delete().eq('dia_cierre_id', cierreId);
+    if (error) throw error;
+  }
+  const con = (arr) => arr.map(x => ({ dia_cierre_id: cierreId, ...x }));
+  if (p.extras.length) { const { error } = await supabase.from('forma_pago_extra').insert(con(p.extras)); if (error) throw error; }
+  if (p.gastos.length) { const { error } = await supabase.from('dia_gasto').insert(con(p.gastos)); if (error) throw error; }
+  if (p.sacos.length)  { const { error } = await supabase.from('dia_saco').insert(con(p.sacos)); if (error) throw error; }
+  return cierreId;
+}
+function conTope(promesa, ms) {
+  return Promise.race([promesa, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout: el servidor no respondió")), ms))]);
+}
+function esErrorDeRed(e) {
+  if (!navigator.onLine) return true;
+  const m = String((e && (e.message || e.details || e)) || "").toLowerCase();
+  return m.includes("fetch") || m.includes("network") || m.includes("load failed") || m.includes("timeout") || (e && e.status >= 500);
+}
+function colaCierreLeer() { try { return JSON.parse(localStorage.getItem(COLA_CIERRE_KEY) || "[]"); } catch { return []; } }
+function colaCierreEscribir(c) { try { localStorage.setItem(COLA_CIERRE_KEY, JSON.stringify(c)); } catch {} pintarColaCierre(); }
+function colaCierreGuardar(p) { colaCierreEscribir([...colaCierreLeer().filter(x => x.fecha !== p.fecha), p]); } // el último paquete del día manda
+function colaCierreQuitar(fecha) { colaCierreEscribir(colaCierreLeer().filter(x => x.fecha !== fecha)); }
+function pintarColaCierre() {
+  const c = colaCierreLeer();
+  let el = document.getElementById("colaCierreAviso");
+  if (!c.length) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement("div"); el.id = "colaCierreAviso";
+    el.style.cssText = "position:sticky;top:0;z-index:18;background:#fffbeb;border-bottom:2px solid #f59e0b;color:#92400e;padding:8px 14px;font-size:13px;line-height:1.4;text-align:center";
+    const anchor = document.getElementById("srvBanner"); (anchor ? anchor : document.body.firstChild).insertAdjacentElement(anchor ? "afterend" : "beforebegin", el);
+  }
+  el.innerHTML = `⏳ Cierre del <b>${c.map(x => x.fecha.split("-").reverse().join("/")).join(", ")}</b> guardado en este equipo, pendiente de enviar. Se envía solo apenas vuelva la señal; no tienes que hacer nada.`;
+}
+function avisoCierrePendiente(p) {
+  updateLastSaved("⏳ Cierre pendiente de enviar (" + new Date().toLocaleTimeString() + ")");
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.55);display:grid;place-items:center;z-index:9999;padding:18px";
+  ov.innerHTML = `<div style="background:#fff;border-radius:18px;padding:22px 18px;max-width:380px;width:100%;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.25);font-family:system-ui,sans-serif">
+    <div style="font-size:44px">📵</div>
+    <h3 style="margin:8px 0 6px;font-size:18px;color:#0f172a">Sin conexión con el servidor</h3>
+    <p style="margin:0 0 14px;font-size:14.5px;line-height:1.5;color:#334155">Tu cierre del <b>${p.fecha.split("-").reverse().join("/")}</b>${p.transmitir ? " (cierre oficial)" : ""} quedó guardado en este equipo, completo y con todos sus datos.</p>
+    <p style="margin:0 0 14px;font-weight:700;color:#0f766e">No te preocupes: apenas regrese el internet se actualiza y todo estará bien. 👍</p>
+    <button style="background:#0f766e;color:#fff;border:0;border-radius:12px;padding:13px 18px;font-size:15.5px;font-weight:700;cursor:pointer;width:100%">Entendido</button></div>`;
+  ov.querySelector("button").onclick = () => ov.remove();
+  document.body.appendChild(ov);
+}
+let COLA_CIERRE_ENVIANDO = false;
+async function colaCierreEnviar() {
+  if (COLA_CIERRE_ENVIANDO || !navigator.onLine) return;
+  const c = colaCierreLeer().sort((a, b) => a.fecha.localeCompare(b.fecha));
+  if (!c.length) return;
+  COLA_CIERRE_ENVIANDO = true;
+  try {
+    for (const p of c) {
+      try {
+        const id = await conTope(persistirCierre(p), 15000);
+        colaCierreQuitar(p.fecha);
+        if (p.fecha === state.fecha) {
+          state.cierreId = id;
+          if (p.transmitir) { state.transmittedAt = p.cierrePayload.transmitted_at; state.unlockUntil = 0; }
+          applyLockState();
+        }
+        toast(`✅ Cierre del ${p.fecha.split("-").reverse().join("/")} enviado. ¡Todo en orden!`, 6000);
+        updateLastSaved("Enviado " + new Date().toLocaleTimeString());
+      } catch (e) {
+        if (esErrorDeRed(e)) break;              // sigue sin señal: conservar y reintentar luego
+        console.warn("cierre rechazado por el servidor", p.fecha, e);
+        toast(`⚠️ El cierre del ${p.fecha.split("-").reverse().join("/")} fue rechazado por el servidor: ${e.message || e}. Avísale al administrador.`, 9000);
+        colaCierreQuitar(p.fecha);
+        try { localStorage.setItem("caja_cola_errores", JSON.stringify([...JSON.parse(localStorage.getItem("caja_cola_errores") || "[]"), { ...p, error: String(e.message || e) }].slice(-10))); } catch {}
+      }
+    }
+  } finally { COLA_CIERRE_ENVIANDO = false; }
+}
+window.addEventListener("online", () => setTimeout(colaCierreEnviar, 1500));
+document.addEventListener("visibilitychange", () => { if (!document.hidden) colaCierreEnviar(); });
+setInterval(colaCierreEnviar, 60000);
+window.addEventListener("load", () => { pintarColaCierre(); setTimeout(colaCierreEnviar, 4000); });
 
 // ============================================================================
 // Helpers UI
@@ -1355,7 +1417,7 @@ window.addEventListener("appinstalled", () => {
 })();
 
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const APP_BUILD = "2026-09-13.2";
+const APP_BUILD = "2026-09-13.3";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
 
 // ============================================================================
