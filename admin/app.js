@@ -703,9 +703,15 @@ function renderSacosAdmin() {
   wireSacosRowListeners();
 }
 
+// 2026-09-24: estos guardados no revisaban el error → sin señal decían "listo" sin haber guardado.
+function errGuardar(e) {
+  const m = String((e && (e.message || e)) || "");
+  return (!navigator.onLine || /fetch|network|load failed/i.test(m)) ? "📵 Sin conexión: no se guardó. Inténtalo cuando vuelva la señal." : "No se guardó: " + m;
+}
 function wireSacosRowListeners() {
   document.querySelectorAll(".saco-prod-toggle").forEach(b => b.onclick = async () => {
-    await sb.from("saco_producto").update({ activo: !(b.dataset.activo === "true") }).eq("id", b.dataset.id);
+    const { error } = await sb.from("saco_producto").update({ activo: !(b.dataset.activo === "true") }).eq("id", b.dataset.id);
+    if (error) { toast(errGuardar(error), 4000); return; }
     await fetchSacoCatalogos(); renderSacosAdmin();
   });
   document.querySelectorAll(".saco-prod-del").forEach(b => b.onclick = async () => {
@@ -717,7 +723,8 @@ function wireSacosRowListeners() {
       // que pasó con "Azul 50kg"). Se ofrece ocultarlo en su lugar.
       if (error.code === "23503") {
         if (confirm("Este saco ya tiene consumo o compras registradas, así que no se puede borrar sin romper el historial.\n\n¿Querés ocultarlo? Deja de aparecer en la app pero los registros viejos se conservan.")) {
-          await sb.from("saco_producto").update({ activo: false }).eq("id", b.dataset.id);
+          const r2 = await sb.from("saco_producto").update({ activo: false }).eq("id", b.dataset.id);
+          if (r2.error) { toast(errGuardar(r2.error), 4000); return; }
           await fetchSacoCatalogos(); renderSacosAdmin();
           toast("Saco ocultado");
         }
@@ -1074,7 +1081,18 @@ async function guardarAjusteStock() {
     if (minInp && minInp.value.trim() !== "") patch.stock_min = Number(minInp.value);
     if (Object.keys(patch).length) ups.push({ id, patch });
   });
-  for (const u of ups) await sb.from("saco_producto").update(u.patch).eq("id", u.id);
+  // Antes no revisaba errores: sin señal cerraba y decía "Existencia actualizada" sin haber guardado nada.
+  let ok = 0, fallas = [];
+  for (const u of ups) {
+    const { error } = await sb.from("saco_producto").update(u.patch).eq("id", u.id);
+    if (error) fallas.push(error); else ok++;
+  }
+  if (fallas.length) {
+    // El modal queda abierto con lo escrito para poder reintentar.
+    toast(errGuardar(fallas[0]) + (ok ? " (" + ok + " de " + ups.length + " sí se guardaron)" : ""), 5000);
+    if (ok) reload();
+    return;
+  }
   closeModal("modalAjusteStock");
   toast("Existencia actualizada (solo los productos que escribiste)");
   reload();
@@ -1157,13 +1175,15 @@ function wireFormasPagoRows() {
   });
   document.querySelectorAll(".fp-toggle").forEach(b => b.onclick = async () => {
     const nuevoActivo = !(b.dataset.activo === "true");
-    await sb.from("forma_pago_catalogo").update({ activo: nuevoActivo }).eq("id", b.dataset.id);
+    const { error } = await sb.from("forma_pago_catalogo").update({ activo: nuevoActivo }).eq("id", b.dataset.id);
+    if (error) { toast(errGuardar(error), 4000); return; }
     await fetchFormasPago(); renderFormasPagoAdmin();
     toast(nuevoActivo ? "Visible en la caja" : "Oculta en la caja");
   });
   document.querySelectorAll(".fp-del").forEach(b => b.onclick = async () => {
     if (!confirm("¿Borrar esta forma de pago? (los cierres ya guardados conservan su dato)")) return;
-    await sb.from("forma_pago_catalogo").delete().eq("id", b.dataset.id);
+    const { error } = await sb.from("forma_pago_catalogo").delete().eq("id", b.dataset.id);
+    if (error) { toast(errGuardar(error), 4000); return; }
     await fetchFormasPago(); renderFormasPagoAdmin();
     toast("Forma de pago borrada");
   });
@@ -1527,7 +1547,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-09-13.2";
+const APP_BUILD = "2026-09-24.1";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
