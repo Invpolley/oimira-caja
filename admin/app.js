@@ -2,8 +2,59 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, ADMIN_PIN } from "./config.js";
 
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { db: { schema: "oimira_caja" } });
-const sbPagos = createClient(SUPABASE_URL, SUPABASE_ANON_KEY); // schema public — app OiMira Pagos
+/* ===== LECTURA CON COPIA (2026-09-24) — regla del ecosistema: sin internet todo sigue funcionando =====
+   Cada lectura (GET a /rest/v1/, y las RPC de solo lectura indicadas) que llega bien se guarda en Cache Storage.
+   Sin señal (o servidor 5xx) se devuelve la última copia y aparece una franja amarilla con la fecha.
+   El nombre de la caché NO empieza con el prefijo de ningún service worker del sitio (GitHub Pages comparte origen). */
+function crearFetchConCopia(CACHE_DATOS, rpcLectura) {
+  rpcLectura = rpcLectura || [];
+  var desde = 0;
+  function pintar() {
+    var b = document.getElementById("copiaBanner");
+    if (!b) { b = document.createElement("div"); b.id = "copiaBanner"; b.style.cssText = "position:sticky;top:0;z-index:9999;background:#fef3c7;color:#92400e;font-size:12.5px;padding:6px 12px;text-align:center;border-bottom:1px solid #fcd34d;display:none"; document.body.prepend(b); }
+    if (!desde) { b.style.display = "none"; return; }
+    var d = new Date(desde);
+    b.textContent = "📴 Sin señal · estás viendo lo guardado en este equipo (" + d.toLocaleDateString("es-VE", { day: "2-digit", month: "2-digit" }) + " " + d.toLocaleTimeString("es-VE", { hour: "2-digit", minute: "2-digit" }) + ") — se actualiza solo al volver el internet. Para guardar cambios hace falta señal.";
+    b.style.display = "block";
+  }
+  window.addEventListener("online", function () { desde = 0; pintar(); });
+  return async function (input, init) {
+    init = init || {};
+    var url = typeof input === "string" ? input : input.url;
+    var m = (init.method || (input && input.method) || "GET").toUpperCase();
+    var esRpcLectura = m === "POST" && rpcLectura.some(function (n) { return url.indexOf("/rest/v1/rpc/" + n) >= 0; });
+    var esLectura = ((m === "GET" || m === "HEAD") && url.indexOf("/rest/v1/") >= 0) || esRpcLectura;
+    if (!esLectura || !("caches" in window)) return fetch(input, init);
+    var clave = url + (url.indexOf("?") >= 0 ? "&" : "?") + "__m=" + m + (esRpcLectura ? "&__b=" + encodeURIComponent(String(init.body || "")) : "");
+    async function copia(motivo) {
+      try {
+        var hit = await (await caches.open(CACHE_DATOS)).match(clave);
+        if (hit) { var t = Number(hit.headers.get("x-guardado") || Date.now()); desde = desde ? Math.min(desde, t) : t; pintar(); return hit; }
+      } catch (e) { /* */ }
+      if (motivo instanceof Response) return motivo;
+      throw motivo;
+    }
+    var r;
+    try {
+      if (!navigator.onLine) throw new TypeError("Failed to fetch (sin señal)");
+      var ctl = new AbortController(); var tope = setTimeout(function () { ctl.abort(); }, 12000);
+      try { r = await fetch(input, Object.assign({}, init, { signal: init.signal || ctl.signal })); } finally { clearTimeout(tope); }
+    } catch (e) { return copia(e); }
+    if (r.status >= 500) return copia(r);
+    if (r.ok) {
+      try {
+        var h = new Headers(r.headers); h.set("x-guardado", String(Date.now()));
+        var cp = new Response(await r.clone().arrayBuffer(), { status: r.status, statusText: r.statusText, headers: h });
+        caches.open(CACHE_DATOS).then(function (c) { return c.put(clave, cp); }).catch(function () {});
+      } catch (e) { /* sin espacio: seguir sin copia */ }
+      if (desde) { desde = 0; pintar(); }
+    }
+    return r;
+  };
+}
+const FETCH_COPIA = crearFetchConCopia("datos-caja-admin-v1");
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { db: { schema: "oimira_caja" }, global: { fetch: FETCH_COPIA } });
+const sbPagos = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { fetch: FETCH_COPIA } }); // schema public — app OiMira Pagos
 
 // ============================================================
 // Estado
@@ -1547,7 +1598,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-09-24.1";
+const APP_BUILD = "2026-09-24.2";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;

@@ -1,7 +1,7 @@
 // Service Worker para OiMira Admin — cache + offline + resiliente a caídas del hosting (PROTOCOLO PWA RESILIENTE 2026-09-13)
 // ⚠ Subir SW_VERSION en CADA despliegue. Si este archivo no cambia,
 // el navegador no detecta versión nueva y los celulares quedan pegados.
-const SW_VERSION = "2026-09-24.1";
+const SW_VERSION = "2026-09-24.2";
 const CACHE_PREFIJO = "oimira-admin-"; // solo se borran cachés viejas de ESTA app (GitHub Pages: varias apps comparten origen)
 const CACHE_NAME = CACHE_PREFIJO + SW_VERSION;
 const ASSETS = [
