@@ -509,6 +509,16 @@ function escapeHtml(s) {
 // ============================================================================
 // Carga inicial
 // ============================================================================
+// 2026-09-24: copia local de los catálogos (categorías de gasto, formas de pago, sacos). Sin señal, la
+// cajera ve la última lista buena en vez de un desplegable vacío o la lista fija vieja del código.
+const CATALOGO_COPIA_KEY = "caja_catalogo_copia_v1";
+function catalogoCopiaLeer() { try { return JSON.parse(localStorage.getItem(CATALOGO_COPIA_KEY) || "{}"); } catch { return {}; } }
+function catalogoCopiaGuardar(clave, lista) {
+  if (!Array.isArray(lista) || !lista.length) return;
+  try { const c = catalogoCopiaLeer(); c[clave] = { t: Date.now(), d: lista }; localStorage.setItem(CATALOGO_COPIA_KEY, JSON.stringify(c)); } catch {}
+}
+function catalogoCopia(clave) { const c = catalogoCopiaLeer()[clave]; return (c && Array.isArray(c.d) && c.d.length) ? c.d : null; }
+
 async function loadCatalog() {
   // Categorías
   try {
@@ -517,8 +527,9 @@ async function loadCatalog() {
       .select('*')
       .eq('activo', true)
       .order('orden');
-    if (!e1 && cats && cats.length > 0) categorias = cats;
+    if (!e1 && cats && cats.length > 0) { categorias = cats; catalogoCopiaGuardar("categorias", cats); }
   } catch (e) { console.warn("loadCatalog categorias error:", e); }
+  if (!categorias || categorias.length === 0) categorias = catalogoCopia("categorias") || [{ nombre: "Otro" }];
 
   // Formas de pago
   try {
@@ -527,8 +538,9 @@ async function loadCatalog() {
       .select('*')
       .eq('activo', true)
       .order('orden');
-    if (!e2 && fps && fps.length > 0) ingresosCatalog = fps;
+    if (!e2 && fps && fps.length > 0) { ingresosCatalog = fps; catalogoCopiaGuardar("formas_pago", fps); }
   } catch (e) { console.warn("loadCatalog formas_pago error:", e); }
+  if (!ingresosCatalog || ingresosCatalog.length === 0) ingresosCatalog = catalogoCopia("formas_pago") || [];
 
   // ⚠ Si después del fetch ingresosCatalog sigue vacío, usar fallback hardcoded
   if (!ingresosCatalog || ingresosCatalog.length === 0) {
@@ -551,8 +563,9 @@ async function loadCatalog() {
   try {
     const { data, error } = await supabase
       .from('saco_producto').select('*').eq('activo', true).order('orden');
-    if (!error && data && data.length > 0) sacoProductos = data;
+    if (!error && data && data.length > 0) { sacoProductos = data; catalogoCopiaGuardar("sacos", data); }
   } catch (e) { console.warn("loadCatalog saco_producto error:", e); }
+  if (!sacoProductos || sacoProductos.length === 0) sacoProductos = catalogoCopia("sacos") || [];
   if (!sacoProductos || sacoProductos.length === 0) sacoProductos = SACO_PRODUCTOS_FALLBACK.slice();
 
   // Poblar ingresos preset si no hay nada cargado
@@ -1417,7 +1430,7 @@ window.addEventListener("appinstalled", () => {
 })();
 
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const APP_BUILD = "2026-09-13.3";
+const APP_BUILD = "2026-09-24.3";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
 
 // ============================================================================

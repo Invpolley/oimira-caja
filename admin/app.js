@@ -1598,7 +1598,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-09-24.2";
+const APP_BUILD = "2026-09-24.3";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
