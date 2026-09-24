@@ -518,6 +518,14 @@ function catalogoCopiaGuardar(clave, lista) {
   try { const c = catalogoCopiaLeer(); c[clave] = { t: Date.now(), d: lista }; localStorage.setItem(CATALOGO_COPIA_KEY, JSON.stringify(c)); } catch {}
 }
 function catalogoCopia(clave) { const c = catalogoCopiaLeer()[clave]; return (c && Array.isArray(c.d) && c.d.length) ? c.d : null; }
+// Se aplica ANTES de pedir al servidor: sin señal, supabase-js reintenta varios segundos y la pantalla quedaba
+// con el desplegable de categorías vacío mientras tanto.
+function aplicarCatalogoCopia() {
+  const cats = catalogoCopia("categorias"), fps = catalogoCopia("formas_pago"), sacos = catalogoCopia("sacos");
+  if (cats && !categorias.length) categorias = cats;
+  if (fps && !ingresosCatalog.length) ingresosCatalog = fps;
+  if (sacos && !sacoProductos.length) sacoProductos = sacos;
+}
 
 async function loadCatalog() {
   // Categorías
@@ -1335,6 +1343,7 @@ function updateLastSaved(text) {
 
   // Pre-poblar presets con el fallback hardcoded ANTES de todo, para que
   // la UI muestre los 6 inputs aunque falle cualquier fetch posterior.
+  aplicarCatalogoCopia();   // 2026-09-24: la última lista buena guardada en el equipo, antes que la fija del código
   ensureIngresosPresets();
 
   bindStatic();
@@ -1348,6 +1357,8 @@ function updateLastSaved(text) {
     Object.assign(state, draft);
     state.cajera = cajeraActual;
   }
+
+  try { renderAll(); } catch (e) { console.warn("render previo con copia:", e); }
 
   try {
     await loadCatalog();
@@ -1430,7 +1441,7 @@ window.addEventListener("appinstalled", () => {
 })();
 
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const APP_BUILD = "2026-09-24.3";
+const APP_BUILD = "2026-09-24.4";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
 
 // ============================================================================
