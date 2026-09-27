@@ -1,6 +1,6 @@
 // OiMira Admin — lógica del panel
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { SUPABASE_URL, SUPABASE_ANON_KEY, ADMIN_PIN } from "./config.js";
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 
 /* ===== LECTURA CON COPIA (2026-09-24) — regla del ecosistema: sin internet todo sigue funcionando =====
    Cada lectura (GET a /rest/v1/, y las RPC de solo lectura indicadas) que llega bien se guarda en Cache Storage.
@@ -153,7 +153,29 @@ function fmtFecha(iso) {
 // ============================================================
 function checkPinSession() {
   const until = Number(localStorage.getItem("oimira_admin_pin_until") || "0");
+  // 26/09/2026: las sesiones abiertas con el viejo PIN general (sin nombre) ya no valen
+  if (!localStorage.getItem("oimira_admin_quien")) { localStorage.removeItem("oimira_admin_pin_until"); return false; }
   return Date.now() < until;
+}
+// Sin señal: entra quien ya entró con su PIN en ESTE equipo (últimos 30 días). Se guarda solo una huella SHA-256 con sal.
+const OFF_KEY = "oimira_admin_offline_v1";
+async function huella(pin, sal) {
+  const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(sal + ":" + pin));
+  return Array.from(new Uint8Array(b)).map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+async function offlineGuardar(pin, nombre) {
+  try {
+    const sal = crypto.getRandomValues(new Uint32Array(4)).join("-");
+    const lista = JSON.parse(localStorage.getItem(OFF_KEY) || "[]").filter((x) => x.nombre !== nombre && x.hasta > Date.now());
+    lista.push({ nombre, sal, h: await huella(pin, sal), hasta: Date.now() + 30 * 86400000 });
+    localStorage.setItem(OFF_KEY, JSON.stringify(lista));
+  } catch (e) { /* sin crypto.subtle: solo con señal */ }
+}
+async function offlineVerificar(pin) {
+  try {
+    for (const x of JSON.parse(localStorage.getItem(OFF_KEY) || "[]")) if (x.hasta > Date.now() && (await huella(pin, x.sal)) === x.h) return x.nombre;
+  } catch (e) { /* */ }
+  return null;
 }
 
 function unlockUI() {
@@ -172,12 +194,12 @@ function setupPinGate() {
   }
   const input = $("pinInput");
   input.focus();
-  // 2026-09-26 (pedido de Polley): además del PIN general, entra con su PIN PERSONAL de Compras quien tenga el
+  // 2026-09-26 (pedido de Polley): SIN PIN general. Entra con su PIN PERSONAL de Compras quien tenga el
   // permiso "Admin de cierres de caja" (o sea dueño). Se administra en config.fitmassa.com → 👥 Accesos.
-  // El PIN personal se verifica en el servidor (RPC caja_admin_login, queda registrado); sin señal solo sirve el general.
+  // El PIN personal se verifica en el servidor (RPC caja_admin_login, queda registrado); sin señal entra quien ya entró en este equipo.
   const entrar = (quien) => {
     localStorage.setItem("oimira_admin_pin_until", String(Date.now() + 12 * 3600 * 1000)); // sesión 12h
-    if (quien) localStorage.setItem("oimira_admin_quien", quien); else localStorage.removeItem("oimira_admin_quien");
+    localStorage.setItem("oimira_admin_quien", quien || "Admin");
     unlockUI();
   };
   const fallo = (txt) => {
@@ -190,18 +212,24 @@ function setupPinGate() {
   const submit = async () => {
     const pin = input.value.trim();
     if (!pin) return;
-    if (pin === ADMIN_PIN) return entrar(null);
     if (!/^[0-9]{4,10}$/.test(pin)) return fallo();
     if (verificando) return;
-    if (!navigator.onLine) return fallo("Sin señal: el PIN personal necesita internet para verificarse.");
+    if (!navigator.onLine) {
+      const n = await offlineVerificar(pin);
+      return n ? entrar(n) : fallo("Sin señal: solo puede entrar quien ya entró antes con su PIN en este equipo.");
+    }
     verificando = true; $("pinSubmit").disabled = true; $("pinSubmit").textContent = "Verificando…";
     try {
       const { data, error } = await sbPagos.rpc("caja_admin_login", { p_pin: pin });
       if (error) throw error;
-      if (data && data.ok) return entrar(data.nombre || "");
+      if (data && data.ok) { await offlineGuardar(pin, data.nombre || "Admin"); return entrar(data.nombre || "Admin"); }
       fallo("PIN incorrecto o sin permiso para el admin de cierres");
     } catch (e) {
-      fallo(/fetch|network|load failed/i.test(String(e && (e.message || e))) ? "Sin señal: el PIN personal necesita internet para verificarse." : "No se pudo verificar: " + (e.message || e));
+      if (/fetch|network|load failed|timeout/i.test(String(e && (e.message || e)))) {
+        const n = await offlineVerificar(pin);
+        return n ? entrar(n) : fallo("Sin señal: solo puede entrar quien ya entró antes con su PIN en este equipo.");
+      }
+      fallo("No se pudo verificar: " + (e.message || e));
     } finally {
       verificando = false; $("pinSubmit").disabled = false; $("pinSubmit").textContent = "Entrar";
     }
@@ -1625,7 +1653,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-09-26.1";
+const APP_BUILD = "2026-09-26.2";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;

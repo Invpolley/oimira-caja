@@ -6,7 +6,5 @@
 export const SUPABASE_URL = "https://pjanwmwuzkmjawcjpjtx.supabase.co";
 export const SUPABASE_ANON_KEY = "sb_publishable_Af20dNnlmYwC4n_xLfkYGg_WsxyWApK";
 
-// PIN de admin (cambialo cuando quieras — es solo protección básica)
-// No es seguridad real (el JS es público), sino una barrera para que
-// la cajera u otros no entren por accidente.
-export const ADMIN_PIN = "197319";
+// 26/09/2026: ya NO hay PIN general. Cada persona entra con su PIN personal de Compras si tiene el permiso
+// "Admin de cierres de caja" (o es dueño). Se administra en config.fitmassa.com → 👥 Accesos y PIN.
