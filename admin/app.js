@@ -159,6 +159,9 @@ function checkPinSession() {
 function unlockUI() {
   $("pinGate").classList.add("hidden");
   $("app").classList.remove("hidden");
+  const quien = localStorage.getItem("oimira_admin_quien");
+  const lb = $("logoutBtn");
+  if (lb) { lb.title = quien ? "Entró: " + quien : "Entró con el PIN general"; if (quien && !$("adminQuien")) lb.insertAdjacentHTML("beforebegin", '<span id="adminQuien" class="text-xs opacity-90 mr-1">👤 ' + quien.split(" ")[0].replace(/[<>&]/g, "") + '</span>'); }
   init();
 }
 
@@ -169,15 +172,38 @@ function setupPinGate() {
   }
   const input = $("pinInput");
   input.focus();
-  const submit = () => {
-    if (input.value === ADMIN_PIN) {
-      // sesión 12h
-      localStorage.setItem("oimira_admin_pin_until", String(Date.now() + 12 * 3600 * 1000));
-      unlockUI();
-    } else {
-      $("pinError").classList.remove("hidden");
-      input.value = "";
-      input.focus();
+  // 2026-09-26 (pedido de Polley): además del PIN general, entra con su PIN PERSONAL de Compras quien tenga el
+  // permiso "Admin de cierres de caja" (o sea dueño). Se administra en config.fitmassa.com → 👥 Accesos.
+  // El PIN personal se verifica en el servidor (RPC caja_admin_login, queda registrado); sin señal solo sirve el general.
+  const entrar = (quien) => {
+    localStorage.setItem("oimira_admin_pin_until", String(Date.now() + 12 * 3600 * 1000)); // sesión 12h
+    if (quien) localStorage.setItem("oimira_admin_quien", quien); else localStorage.removeItem("oimira_admin_quien");
+    unlockUI();
+  };
+  const fallo = (txt) => {
+    $("pinError").textContent = txt || "PIN incorrecto";
+    $("pinError").classList.remove("hidden");
+    input.value = "";
+    input.focus();
+  };
+  let verificando = false;
+  const submit = async () => {
+    const pin = input.value.trim();
+    if (!pin) return;
+    if (pin === ADMIN_PIN) return entrar(null);
+    if (!/^[0-9]{4,10}$/.test(pin)) return fallo();
+    if (verificando) return;
+    if (!navigator.onLine) return fallo("Sin señal: el PIN personal necesita internet para verificarse.");
+    verificando = true; $("pinSubmit").disabled = true; $("pinSubmit").textContent = "Verificando…";
+    try {
+      const { data, error } = await sbPagos.rpc("caja_admin_login", { p_pin: pin });
+      if (error) throw error;
+      if (data && data.ok) return entrar(data.nombre || "");
+      fallo("PIN incorrecto o sin permiso para el admin de cierres");
+    } catch (e) {
+      fallo(/fetch|network|load failed/i.test(String(e && (e.message || e))) ? "Sin señal: el PIN personal necesita internet para verificarse." : "No se pudo verificar: " + (e.message || e));
+    } finally {
+      verificando = false; $("pinSubmit").disabled = false; $("pinSubmit").textContent = "Entrar";
     }
   };
   $("pinSubmit").addEventListener("click", submit);
@@ -1410,6 +1436,7 @@ function init() {
 
   $("logoutBtn").addEventListener("click", () => {
     localStorage.removeItem("oimira_admin_pin_until");
+    localStorage.removeItem("oimira_admin_quien");
     location.reload();
   });
 
@@ -1598,7 +1625,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-09-24.4";
+const APP_BUILD = "2026-09-26.1";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
