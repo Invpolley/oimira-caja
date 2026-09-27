@@ -3,6 +3,7 @@
 
 import { SUPABASE_URL, SUPABASE_ANON_KEY, CAJERA_DEFAULT, DEVICE_NAME } from './config.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { cargarTasaVigente, rsPorBs, rsPorUsd, montarCambioTasa } from './tasa-central.js';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { db: { schema: "oimira_caja" } });
 
@@ -83,6 +84,16 @@ function populateCajeraSelect() {
 // Tasas default (solo se usan si no hay tasa guardada del día; las del día son editables)
 const TASA_BS_DEFAULT  = 0.0170;
 const TASA_USD_DEFAULT = 5.10;
+// 27/09/2026: la tasa por defecto de un cierre nuevo es la PARALELA VIGENTE central (config.fitmassa.com → Parámetros).
+// Las constantes de arriba solo se usan si todavía no hay ninguna tasa central guardada.
+function tasaDefBs()  { return rsPorBs()  || TASA_BS_DEFAULT; }
+function tasaDefUsd() { return rsPorUsd() || TASA_USD_DEFAULT; }
+/** Cierre no enviado y sin tasa puesta a mano con PIN → toma la vigente. Los enviados conservan la suya. */
+function aplicarTasaVigente() {
+  if (state.transmittedAt || state.tasaEditadaPor) return;
+  state.tasaBsRs = tasaDefBs();
+  state.tasaUsdRs = tasaDefUsd();
+}
 
 // Label visual vs nombre interno del catálogo
 // "Dinheiro" es la key en la BD (dinheiro_rs) pero visualmente mostramos
@@ -105,8 +116,10 @@ const state = {
   cierreId: null, // UUID del cierre actual (si ya existe en DB)
   transmittedAt: null,  // si está seteado = cierre oficialmente cerrado
   unlockUntil: 0,       // ms timestamp hasta cuando el modo edición sigue activo
-  tasaBsRs:  TASA_BS_DEFAULT,   // 1 Bs = X R$ para este cierre
+  tasaBsRs:  TASA_BS_DEFAULT,   // 1 Bs = X R$ para este cierre (se reemplaza por la vigente al cargar)
   tasaUsdRs: TASA_USD_DEFAULT,  // 1 USD = X R$ para este cierre
+  tasaEditadaPor: null,         // quién cambió la tasa con PIN en este cierre (queda en tasa_editada_por)
+  tasaEditadaAt: null,
 };
 
 let categorias = [];   // catálogo de categorías de gastos
@@ -450,8 +463,8 @@ function updateTotals() {
   }
 
   // === Gran Total Venta consolidado en R$ + Efectivo que queda ===
-  const tbs = Number(state.tasaBsRs)  || TASA_BS_DEFAULT;
-  const tusd = Number(state.tasaUsdRs) || TASA_USD_DEFAULT;
+  const tbs = Number(state.tasaBsRs)  || tasaDefBs();
+  const tusd = Number(state.tasaUsdRs) || tasaDefUsd();
 
   // Venta bruta efectivo = el monto que la cajera puso en "Dinheiro" (ahora "Total venta efectivo")
   const ventaEfectivoBruta = state.ingresos
@@ -472,7 +485,7 @@ function updateTotals() {
   }
 
   // Preview de tasas (labels "1 Bs = X R$")
-  setTxt("tasaBsPreview", tbs.toLocaleString("pt-BR", {minimumFractionDigits: 4, maximumFractionDigits: 4}));
+  setTxt("tasaBsPreview", tbs.toLocaleString("pt-BR", {minimumFractionDigits: 4, maximumFractionDigits: 6}));
   setTxt("tasaUsdPreview", tusd.toLocaleString("pt-BR", {minimumFractionDigits: 4, maximumFractionDigits: 4}));
 
   // Warning si faltan tasas con montos
@@ -621,8 +634,10 @@ async function loadExistingCierre() {
   state.observacoes = data.observacoes || "";
   state.transmittedAt = data.transmitted_at || null;  // null = borrador, timestamp = cerrado
   // Tasas históricas del cierre (inmutables): si no hay, usar defaults
-  state.tasaBsRs  = data.tasa_bs_rs  != null ? Number(data.tasa_bs_rs)  : TASA_BS_DEFAULT;
-  state.tasaUsdRs = data.tasa_usd_rs != null ? Number(data.tasa_usd_rs) : TASA_USD_DEFAULT;
+  state.tasaBsRs  = data.tasa_bs_rs  != null ? Number(data.tasa_bs_rs)  : tasaDefBs();
+  state.tasaUsdRs = data.tasa_usd_rs != null ? Number(data.tasa_usd_rs) : tasaDefUsd();
+  state.tasaEditadaPor = data.tasa_editada_por || null;
+  state.tasaEditadaAt  = data.tasa_editada_at  || null;
 
   // Rellenar ingresos: presets -> columnas fijas; no-preset (agregadas en admin) -> forma_pago_extra
   const fieldMap = {
@@ -687,8 +702,10 @@ function bindStatic() {
     state.unlockUntil = 0;
     // Reset de tasas al default — si no, quedan pegadas las del día anterior
     // y se guardan en tasa_bs_rs/tasa_usd_rs aunque el cierre nuevo no las haya editado.
-    state.tasaBsRs  = TASA_BS_DEFAULT;
-    state.tasaUsdRs = TASA_USD_DEFAULT;
+    state.tasaBsRs  = tasaDefBs();
+    state.tasaUsdRs = tasaDefUsd();
+    state.tasaEditadaPor = null;
+    state.tasaEditadaAt = null;
     if (_unlockTimer) { clearInterval(_unlockTimer); _unlockTimer = null; }
 
     // 1. Intentar cargar draft local (puede ser un día que la cajera dejó a medias)
@@ -707,6 +724,7 @@ function bindStatic() {
     // 3. Garantizar que los presets (PIX, Dinheiro, Débito, Pago Móvil, Bs, USD)
     //    siempre estén visibles aunque no haya ni draft ni cierre en DB
     ensureIngresosPresets();
+    aplicarTasaVigente();
 
     // NOTA: ya NO bloqueamos "días anteriores sin transmisión" — esos quedan
     // editables como borradores legítimos (caso cajera cargando de mañana
@@ -801,6 +819,19 @@ function bindStatic() {
       saveDraft();
     });
   }
+
+  // 27/09/2026: las tasas ya no se escriben a mano en el cierre; se cambian con PIN (quedan registradas) y valen para todas las apps.
+  montarCambioTasa(document.getElementById("tasaCentral"), {
+    url: SUPABASE_URL, key: SUPABASE_ANON_KEY, app: "caja",
+    onCambio: (v) => {
+      if (state.transmittedAt) { toast("💱 Tasa nueva guardada. Este cierre ya fue enviado y conserva su tasa."); return; }
+      state.tasaBsRs = Number(v.rs_por_bs); state.tasaUsdRs = Number(v.rs_por_usd);
+      state.tasaEditadaPor = v.usuario; state.tasaEditadaAt = v.creado;
+      renderAll(); updateTotals(); saveDraft();
+      toast("💱 Tasa nueva guardada y aplicada a este cierre");
+    },
+  });
+  window.addEventListener("online", () => cargarTasaVigente(SUPABASE_URL, SUPABASE_ANON_KEY).then(() => { const c = document.getElementById("tasaCentral"); if (c && c.querySelector('[data-t="info"]')) { aplicarTasaVigente(); renderAll(); updateTotals(); } }));
 
   // Agregar ingreso nuevo
   document.getElementById("addIngresoBtn").addEventListener("click", () => {
@@ -1087,8 +1118,8 @@ function openConfirmModal() {
   const gasB = state.gastos.filter(g => g.moeda === "Bs").reduce((s, g) => s + (Number(g.monto) || 0), 0);
   const gasU = state.gastos.filter(g => g.moeda === "USD").reduce((s, g) => s + (Number(g.monto) || 0), 0);
   // Gran total venta consolidado en R$ usando las tasas del día
-  const tbs  = Number(state.tasaBsRs)  || TASA_BS_DEFAULT;
-  const tusd = Number(state.tasaUsdRs) || TASA_USD_DEFAULT;
+  const tbs  = Number(state.tasaBsRs)  || tasaDefBs();
+  const tusd = Number(state.tasaUsdRs) || tasaDefUsd();
   const granTotal = sumR + (sumB * tbs) + (sumU * tusd);
   const gastosTotalRs = gasR + (gasB * tbs) + (gasU * tusd);
 
@@ -1159,8 +1190,10 @@ async function enviarCierre(transmitir = true) {
       pago_movil_bs: getPreset('Pago Móvil'),
       bs_efectivo_bs: getPreset('Bs efectivo'),
       usd_usd: getPreset('USD'),
-      tasa_bs_rs:  Number(state.tasaBsRs)  || TASA_BS_DEFAULT,
-      tasa_usd_rs: Number(state.tasaUsdRs) || TASA_USD_DEFAULT,
+      tasa_bs_rs:  Number(state.tasaBsRs)  || tasaDefBs(),
+      tasa_usd_rs: Number(state.tasaUsdRs) || tasaDefUsd(),
+      tasa_editada_por: state.tasaEditadaPor || null,
+      tasa_editada_at:  state.tasaEditadaAt  || null,
       sacos_trigo: calcSacos(state.sacos).totalSacos, // total derivado (compat)
       tickets: state.tickets,
       observacoes: state.observacoes,
@@ -1373,6 +1406,8 @@ function updateLastSaved(text) {
   // Garantizar que los presets siempre estén visibles (PIX, Dinheiro, Débito, Pago Móvil, Bs, USD).
   // Esto protege contra: draft incompleto, fallo de fetch del catálogo, carga de cierre legacy sin todos los campos.
   ensureIngresosPresets();
+  try { await cargarTasaVigente(SUPABASE_URL, SUPABASE_ANON_KEY); } catch (e) { /* copia local */ }
+  aplicarTasaVigente();
 
   // NOTA: ya no bloqueamos "días pasados sin transmitir" automáticamente.
   // Solo bloquea lo que realmente tiene transmitted_at != null (cierre oficial).
@@ -1441,7 +1476,7 @@ window.addEventListener("appinstalled", () => {
 })();
 
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const APP_BUILD = "2026-09-26.2";
+const APP_BUILD = "2026-09-27.1";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
 
 // ============================================================================

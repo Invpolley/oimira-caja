@@ -1,6 +1,7 @@
 // OiMira Admin — lógica del panel
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
+import { cargarTasaVigente, montarCambioTasa } from "./tasa-central.js";
 
 /* ===== LECTURA CON COPIA (2026-09-24) — regla del ecosistema: sin internet todo sigue funcionando =====
    Cada lectura (GET a /rest/v1/, y las RPC de solo lectura indicadas) que llega bien se guarda en Cache Storage.
@@ -1408,6 +1409,14 @@ function wireFormasPagoListeners() {
 }
 
 function init() {
+  // 27/09/2026: 💱 tasa central — el dueño o quien tenga el permiso la cambia aquí con su PIN (queda registrado).
+  // Los cierres ya guardados conservan su propia tasa: cambiarla no altera los días pasados de este panel.
+  const _tc = montarCambioTasa($("tasaCentral"), {
+    url: SUPABASE_URL, key: SUPABASE_ANON_KEY, app: "caja_admin",
+    onCambio: () => { if (typeof toast === "function") toast("💱 Tasa nueva guardada. Los cierres pasados conservan su tasa."); },
+  });
+  cargarTasaVigente(SUPABASE_URL, SUPABASE_ANON_KEY).then(() => _tc && _tc.pintar());
+
   // Rango default: últimos 30 días
   setRango(daysAgo(30), todayISO());
 
@@ -1653,7 +1662,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-09-26.2";
+const APP_BUILD = "2026-09-27.1";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
