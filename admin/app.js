@@ -223,7 +223,11 @@ function setupPinGate() {
     try {
       const { data, error } = await sbPagos.rpc("caja_admin_login", { p_pin: pin });
       if (error) throw error;
-      if (data && data.ok) { await offlineGuardar(pin, data.nombre || "Admin"); return entrar(data.nombre || "Admin"); }
+      if (data && data.ok) {
+        // 2026-09-29: token de sesión para leer/abonar en OiMira Pagos (las tablas de Pagos ya no se leen directo)
+        if (data.token) localStorage.setItem("oimira_admin_token", data.token);
+        await offlineGuardar(pin, data.nombre || "Admin"); return entrar(data.nombre || "Admin");
+      }
       fallo("PIN incorrecto o sin permiso para el admin de cierres");
     } catch (e) {
       if (/fetch|network|load failed|timeout/i.test(String(e && (e.message || e)))) {
@@ -1474,6 +1478,7 @@ function init() {
   $("logoutBtn").addEventListener("click", () => {
     localStorage.removeItem("oimira_admin_pin_until");
     localStorage.removeItem("oimira_admin_quien");
+    localStorage.removeItem("oimira_admin_token");
     location.reload();
   });
 
@@ -1620,16 +1625,24 @@ function wireCodigoListeners() {
 
 /* ===== Interconexion con OiMira Pagos ===== */
 let VINCULOS_PAGOS = [];
+// 2026-09-29: Pagos se lee con el token de la sesión del admin (RPC pagos_datos); sin token = volver a entrar con el PIN
+async function pagosDatos() {
+  const t = localStorage.getItem("oimira_admin_token");
+  if (!t) return null;
+  const { data, error } = await sbPagos.rpc("pagos_datos", { p_token: t });
+  if (error) { if (/Sesión vencida|Sin permiso/i.test(error.message || "")) localStorage.removeItem("oimira_admin_token"); throw error; }
+  return data;
+}
 async function cargarVinculosPagos(moeda) {
   const sel = $("rt_vinculo");
   if (!sel) return;
   sel.innerHTML = '<option value="">— No vincular —</option>';
   VINCULOS_PAGOS = [];
   try {
-    const [rf, rc] = await Promise.all([
-      sbPagos.from("pago_factura_saldo").select("id,titulo,proveedor,saldo,vence").eq("estado", "pendiente").eq("moeda", moeda).gt("saldo", 0).order("vence"),
-      sbPagos.from("pago_credito_saldo").select("id,proveedor,descripcion,saldo").eq("cerrado", false).eq("moeda", moeda).gt("saldo", 0),
-    ]);
+    const D = await pagosDatos();
+    if (!D) { sel.innerHTML = '<option value="">— Para vincular con Pagos, sal y vuelve a entrar con tu PIN —</option>'; return; }
+    const rf = { data: (D.facturas || []).filter(f => f.estado === "pendiente" && f.moeda === moeda && Number(f.saldo) > 0) };
+    const rc = { data: (D.creditos || []).filter(c => !c.cerrado && c.moeda === moeda && Number(c.saldo) > 0) };
     (rf.data || []).forEach(f => {
       VINCULOS_PAGOS.push({ key: "f:" + f.id, saldo: f.saldo, nombre: f.titulo });
       sel.insertAdjacentHTML("beforeend", `<option value="f:${f.id}">🧾 Factura: ${escapeHtml(f.titulo)}${f.proveedor ? " · " + escapeHtml(f.proveedor) : ""} — saldo ${fmtMoeda(f.saldo, moeda)}</option>`);
@@ -1647,7 +1660,8 @@ async function cargarVinculosPagos(moeda) {
     function hoyVE(){ return new Date(Date.now() - 14400000).toISOString().slice(0, 10); }
     const hoy = hoyVE();
     const man = (function(){ const d = new Date(hoy + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
-    const { data: rows } = await sbPagos.from("pago_factura_saldo").select("titulo,saldo,moeda,vence").eq("estado", "pendiente").lte("vence", man).order("vence");
+    const D = await pagosDatos();
+    const rows = D ? (D.facturas || []).filter(p => p.estado === "pendiente" && p.vence <= man) : null;
     if (!rows || !rows.length) return;
     const venc = rows.filter(p => p.vence < hoy).length, dHoy = rows.filter(p => p.vence === hoy).length, dMan = rows.filter(p => p.vence === man).length;
     const partes = [];
@@ -1662,7 +1676,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-09-27.1";
+const APP_BUILD = "2026-09-29.1";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
@@ -2671,11 +2685,8 @@ async function guardarRetiro() {
   // Registrar el pago/abono en OiMira Pagos
   if (vincSel && retIns) {
     const tipo = vincSel.slice(0, 1), pid = vincSel.slice(2);
-    const rpcName = tipo === "f" ? "pago_abonar_factura" : "pago_abonar_credito";
-    const args = tipo === "f"
-      ? { p_factura: pid, p_monto: monto, p_nota: "Retiro caja: " + nota, p_retiro: retIns.id }
-      : { p_credito: pid, p_monto: monto, p_nota: "Retiro caja: " + nota, p_retiro: retIns.id };
-    const rp = await sbPagos.rpc(rpcName, args);
+    const rp = await sbPagos.rpc("pagos_abonar_vinculo", { p_token: localStorage.getItem("oimira_admin_token"), p_tipo: tipo, p_id: pid,
+      p_monto: monto, p_nota: "Retiro caja: " + nota, p_retiro: retIns.id });
     if (rp.error) toast("Retiro guardado, pero el vínculo con Pagos falló: " + rp.error.message, 5000);
     else {
       const d = rp.data || {};
