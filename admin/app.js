@@ -1689,7 +1689,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-09-29.2";
+const APP_BUILD = "2026-09-30.1";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
@@ -2639,6 +2639,10 @@ async function guardarRetiro() {
   if (!canal) { toast("Elegí de qué caja sale"); return; }
   if (!monto || monto <= 0) { toast("Monto inválido"); return; }
   if (!nota || nota.length < 3) { toast("Poné una nota de en qué se usó el dinero"); return; }
+  if (MOTIVOS_DETERIORADOS.includes($("rt_motivo").value)) {
+    if (canal !== "Efectivo") { toast("Los billetes deteriorados salen de Efectivo R$"); return; }
+    if (monto > DET_DISPONIBLE + 0.005) { toast(`⛔ Solo hay ${fmtR(DET_DISPONIBLE)} en billetes deteriorados`, 5000); return; }
+  }
 
   btn.disabled = true;
   btn.dataset.saving = "1";
@@ -2841,22 +2845,39 @@ function wireCajaListeners() {
 // ============================================================
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
 
-// 🩹 Fondo de billetes deteriorados = registrado por cajera − depositado al banco
+// 🩹 Fondo de billetes deteriorados = registrado por cajera − (depositado al banco + gastado)
+// 30/09/2026 (Polley): botón "💸 Sacar / gastar" en la tarjeta; se puede depositar o gastar (pagar con ellos).
+const MOTIVOS_DETERIORADOS = ["Depósito billetes deteriorados", "Gasto con billetes deteriorados"];
+let DET_DISPONIBLE = 0;
 async function renderDeteriorado() {
   try {
     const [{ data: acum }, { data: dep }] = await Promise.all([
       sb.from("dia_cierre").select("efectivo_deteriorado_rs"),
-      sb.from("caja_retiro").select("monto").eq("canal", "Efectivo").eq("motivo", "Depósito billetes deteriorados"),
+      sb.from("caja_retiro").select("monto,motivo").eq("canal", "Efectivo").in("motivo", MOTIVOS_DETERIORADOS),
     ]);
     const entrado = (acum || []).reduce((s, r) => s + Number(r.efectivo_deteriorado_rs || 0), 0);
-    const depositado = (dep || []).reduce((s, r) => s + Number(r.monto || 0), 0);
+    const depositado = (dep || []).filter(r => r.motivo === MOTIVOS_DETERIORADOS[0]).reduce((s, r) => s + Number(r.monto || 0), 0);
+    const gastado = (dep || []).filter(r => r.motivo === MOTIVOS_DETERIORADOS[1]).reduce((s, r) => s + Number(r.monto || 0), 0);
+    DET_DISPONIBLE = Math.round((entrado - depositado - gastado) * 100) / 100;
     const card = document.getElementById("cardDeteriorado");
     if (!card) return;
-    card.style.display = (entrado > 0 || depositado > 0) ? "" : "none";
-    const t = document.getElementById("detTotal"); if (t) t.textContent = fmtR(entrado - depositado);
-    const d = document.getElementById("detDetalle"); if (d) d.textContent = `Registrado ${fmtR(entrado)} · Depositado ${fmtR(depositado)}`;
+    card.style.display = (entrado > 0 || depositado > 0 || gastado > 0) ? "" : "none";
+    const t = document.getElementById("detTotal"); if (t) t.textContent = fmtR(DET_DISPONIBLE);
+    const d = document.getElementById("detDetalle"); if (d) d.textContent = `Registrado ${fmtR(entrado)} · Depositado ${fmtR(depositado)}` + (gastado ? ` · Gastado ${fmtR(gastado)}` : "");
+    const b = document.getElementById("btnDeteriorados"); if (b) b.disabled = DET_DISPONIBLE <= 0;
   } catch (e) { console.error("renderDeteriorado", e); }
 }
+// Abre el retiro ya listo: R$ → Efectivo → motivo deteriorados. Solo falta monto, depósito/gasto y la nota.
+async function abrirRetiroDeteriorados() {
+  await openRetiroModal();
+  selectMoeda("R$");
+  selectCanal("Efectivo");
+  $("rt_motivo").value = MOTIVOS_DETERIORADOS[0];
+  $("rt_monto").value = DET_DISPONIBLE > 0 ? String(DET_DISPONIBLE) : "";
+  $("rt_canalSaldo").textContent = "🩹 Billetes deteriorados disponibles: " + fmtR(DET_DISPONIBLE) + " — elige abajo si es depósito al banco o gasto.";
+  actualizarResumenRetiro();
+}
+(function () { const b = document.getElementById("btnDeteriorados"); if (b) b.addEventListener("click", (e) => { e.stopPropagation(); abrirRetiroDeteriorados(); }); })();
 
 // Sello visible. Usa la MISMA constante que el service worker para que no puedan
 // contradecirse: era justo el bug que hacía parecer que la app no se actualizaba.
