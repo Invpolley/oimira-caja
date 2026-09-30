@@ -5,7 +5,75 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY, CAJERA_DEFAULT, DEVICE_NAME } from './
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { cargarTasaVigente, rsPorBs, rsPorUsd, montarCambioTasa } from './tasa-central.js';
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { db: { schema: "oimira_caja" } });
+// ============================================================================
+// SESIÓN CON PIN PERSONAL (2026-09-29, seguridad): los cierres ya no se leen/escriben sin sesión.
+// La cajera entra una vez con su PIN (el de Compras) y el equipo queda con la sesión 30 días.
+// El token viaja en el header x-caja-token; la base de datos lo exige en cada cierre.
+// Sin señal se sigue trabajando igual: el cierre queda en cola y se envía al volver (si hace falta, pide el PIN).
+// ============================================================================
+const CAJA_SES_KEY = "caja_sesion_v1";
+function cajaSes() {
+  try { const s = JSON.parse(localStorage.getItem(CAJA_SES_KEY) || "null"); return s && s.hasta > Date.now() ? s : null; } catch { return null; }
+}
+function cajaToken() { const s = cajaSes(); return s ? s.token : ""; }
+const fetchConSesion = (input, init = {}) => {
+  const h = new Headers(init.headers || (input && input.headers) || {});
+  const t = cajaToken(); if (t) h.set("x-caja-token", t);
+  return fetch(input, { ...init, headers: h });
+};
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { db: { schema: "oimira_caja" }, global: { fetch: fetchConSesion } });
+const SIN_SESION = "SIN_SESION";
+function esSinSesion(e) { const m = String((e && (e.message || e.code || e)) || ""); return m === SIN_SESION || /row-level security|42501|permission denied/i.test(m) || (e && e.code === "42501"); }
+let GATE_ABIERTO = false;
+function mostrarGateCaja(motivo) {
+  if (GATE_ABIERTO) return; GATE_ABIERTO = true;
+  const ov = document.createElement("div"); ov.id = "cajaGate";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.72);display:grid;place-items:center;z-index:10000;padding:18px";
+  ov.innerHTML = `<div style="background:#fff;border-radius:18px;padding:22px 18px;max-width:360px;width:100%;text-align:center;font-family:system-ui,sans-serif">
+    <div style="font-size:40px">🔐</div>
+    <h3 style="margin:6px 0;font-size:18px;color:#0f172a">Entra con tu PIN</h3>
+    <p style="margin:0 0 12px;font-size:13.5px;color:#475569">${motivo || "Es el mismo PIN de Compras. Solo se pide una vez al mes en este equipo."}</p>
+    <input id="cgPin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN" style="width:100%;box-sizing:border-box;text-align:center;font-size:22px;letter-spacing:5px;padding:10px;border:1px solid #cbd5e1;border-radius:12px">
+    <button id="cgEntrar" style="margin-top:10px;background:#0f766e;color:#fff;border:0;border-radius:12px;padding:12px;font-size:15.5px;font-weight:700;width:100%">Entrar</button>
+    <button id="cgLuego" style="margin-top:8px;background:#fff;color:#475569;border:1px solid #cbd5e1;border-radius:12px;padding:10px;font-size:13.5px;width:100%">Seguir sin señal (entro después)</button>
+    <div id="cgMsg" style="margin-top:8px;font-size:13px;color:#b91c1c;min-height:18px"></div></div>`;
+  document.body.appendChild(ov);
+  const pin = ov.querySelector("#cgPin"), btn = ov.querySelector("#cgEntrar"), msgEl = ov.querySelector("#cgMsg");
+  const luego = ov.querySelector("#cgLuego"); luego.style.display = navigator.onLine ? "none" : "block";
+  const cerrar = () => { ov.remove(); GATE_ABIERTO = false; };
+  luego.onclick = cerrar;
+  setTimeout(() => pin.focus(), 50);
+  const entrar = async () => {
+    const p = pin.value.trim();
+    if (!/^[0-9]{4,10}$/.test(p)) { msgEl.textContent = "PIN incorrecto"; return; }
+    if (!navigator.onLine) { msgEl.textContent = "Sin señal: para entrar hace falta internet."; luego.style.display = "block"; return; }
+    btn.disabled = true; btn.textContent = "Verificando…";
+    try {
+      const { data, error } = await supabase.schema("public").rpc("caja_login", { p_pin: p });
+      if (error) throw error;
+      if (!data || !data.ok) { msgEl.textContent = "PIN incorrecto o sin permiso para la caja"; pin.value = ""; pin.focus(); return; }
+      localStorage.setItem(CAJA_SES_KEY, JSON.stringify({ token: data.token, nombre: data.nombre, hasta: Date.now() + 29 * 86400000 }));
+      cerrar();
+      toast("👋 Hola " + String(data.nombre || "").split(" ")[0] + ". Sesión abierta en este equipo.");
+      try { await loadExistingCierre(); } catch (e) { /* */ }
+      ensureIngresosPresets(); renderAll(); applyLockState();
+      setTimeout(colaCierreEnviar, 500);
+    } catch (e) { msgEl.textContent = esErrorDeRed(e) ? "Sin señal: inténtalo cuando vuelva el internet." : ("No se pudo verificar: " + (e.message || e)); }
+    finally { btn.disabled = false; btn.textContent = "Entrar"; }
+  };
+  btn.onclick = entrar;
+  pin.addEventListener("keydown", (e) => { if (e.key === "Enter") entrar(); });
+}
+async function verificarSesionCaja() {
+  const s = cajaSes();
+  if (!s) { mostrarGateCaja(); return false; }
+  if (!navigator.onLine) return true;
+  try {
+    const { data, error } = await supabase.schema("public").rpc("caja_sesion_ok", { p_token: s.token });
+    if (!error && data === false) { localStorage.removeItem(CAJA_SES_KEY); mostrarGateCaja("Tu sesión venció o cambió tu permiso. Entra de nuevo con tu PIN."); return false; }
+  } catch (e) { /* sin señal: seguir */ }
+  return true;
+}
 
 // ============================================================================
 // Helpers de fecha en zona Caracas/La Paz (UTC-4) — FORZADA, no depende del device
@@ -1239,7 +1307,11 @@ async function enviarCierre(transmitir = true) {
 
   } catch (err) {
     console.error(err);
-    if (esErrorDeRed(err) && ULTIMO_PAQUETE && ULTIMO_PAQUETE.fecha === state.fecha) {
+    if (esSinSesion(err) && ULTIMO_PAQUETE && ULTIMO_PAQUETE.fecha === state.fecha) {
+      // Sin sesión válida: el cierre NO se pierde; queda en cola y se envía apenas entre con su PIN
+      colaCierreGuardar(ULTIMO_PAQUETE); localStorage.removeItem(CAJA_SES_KEY);
+      mostrarGateCaja("Para enviar el cierre, entra con tu PIN. Tu cierre quedó guardado en este equipo.");
+    } else if (esErrorDeRed(err) && ULTIMO_PAQUETE && ULTIMO_PAQUETE.fecha === state.fecha) {
       // Señal caída o servidor sin responder: queda en cola y se reenvía solo
       colaCierreGuardar(ULTIMO_PAQUETE); avisoCierrePendiente(ULTIMO_PAQUETE);
     } else {
@@ -1262,10 +1334,12 @@ const COLA_CIERRE_KEY = "caja_cola_cierres_v1";
 
 // Escribe en Supabase el paquete completo del cierre. Idempotente: upsert por fecha + borrar/reinsertar hijos.
 async function persistirCierre(p) {
+  if (!cajaToken()) throw new Error(SIN_SESION); // sin sesión no se toca el servidor: el paquete queda en cola
   let cierreId = p.cierreId;
   if (cierreId) {
-    const { error } = await supabase.from('dia_cierre').update(p.cierrePayload).eq('id', cierreId);
+    const { data: upd, error } = await supabase.from('dia_cierre').update(p.cierrePayload).eq('id', cierreId).select('id');
     if (error) throw error;
+    if (!upd || !upd.length) throw new Error(SIN_SESION); // 0 filas = la base de datos no aceptó la sesión
   } else {
     const { data, error } = await supabase.from('dia_cierre')
       .upsert(p.cierrePayload, { onConflict: 'fecha' })
@@ -1339,6 +1413,11 @@ async function colaCierreEnviar() {
         toast(`✅ Cierre del ${p.fecha.split("-").reverse().join("/")} enviado. ¡Todo en orden!`, 6000);
         updateLastSaved("Enviado " + new Date().toLocaleTimeString());
       } catch (e) {
+        if (esSinSesion(e)) {                    // falta el PIN: conservar y pedirlo (nunca descartar el cierre)
+          if (cajaToken()) localStorage.removeItem(CAJA_SES_KEY);
+          mostrarGateCaja("Hay un cierre guardado en este equipo esperando para enviarse. Entra con tu PIN.");
+          break;
+        }
         if (esErrorDeRed(e)) break;              // sigue sin señal: conservar y reintentar luego
         console.warn("cierre rechazado por el servidor", p.fecha, e);
         toast(`⚠️ El cierre del ${p.fecha.split("-").reverse().join("/")} fue rechazado por el servidor: ${e.message || e}. Avísale al administrador.`, 9000);
@@ -1392,6 +1471,8 @@ function updateLastSaved(text) {
   }
 
   try { renderAll(); } catch (e) { console.warn("render previo con copia:", e); }
+
+  await verificarSesionCaja(); // 2026-09-29: sin sesión muestra el PIN (sin señal deja seguir trabajando)
 
   try {
     await loadCatalog();
@@ -1476,7 +1557,7 @@ window.addEventListener("appinstalled", () => {
 })();
 
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const APP_BUILD = "2026-09-29.1";
+const APP_BUILD = "2026-09-29.2";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
 
 // ============================================================================

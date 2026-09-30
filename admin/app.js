@@ -53,7 +53,13 @@ function crearFetchConCopia(CACHE_DATOS, rpcLectura) {
     return r;
   };
 }
-const FETCH_COPIA = crearFetchConCopia("datos-caja-admin-v1");
+const FETCH_COPIA_BASE = crearFetchConCopia("datos-caja-admin-v1");
+// 2026-09-29 (seguridad): cada consulta lleva el token de la sesión del admin; la base de datos lo exige (RLS)
+const FETCH_COPIA = (input, init = {}) => {
+  const h = new Headers(init.headers || (input && input.headers) || {});
+  const t = localStorage.getItem("oimira_admin_token"); if (t) h.set("x-caja-token", t);
+  return FETCH_COPIA_BASE(input, { ...init, headers: h });
+};
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { db: { schema: "oimira_caja" }, global: { fetch: FETCH_COPIA } });
 const sbPagos = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { fetch: FETCH_COPIA } }); // schema public — app OiMira Pagos
 
@@ -156,6 +162,8 @@ function checkPinSession() {
   const until = Number(localStorage.getItem("oimira_admin_pin_until") || "0");
   // 26/09/2026: las sesiones abiertas con el viejo PIN general (sin nombre) ya no valen
   if (!localStorage.getItem("oimira_admin_quien")) { localStorage.removeItem("oimira_admin_pin_until"); return false; }
+  // 29/09/2026: con señal hace falta el token de sesión (la base de datos ya no deja leer sin él)
+  if (navigator.onLine && !localStorage.getItem("oimira_admin_token")) { localStorage.removeItem("oimira_admin_pin_until"); return false; }
   return Date.now() < until;
 }
 // Sin señal: entra quien ya entró con su PIN en ESTE equipo (últimos 30 días). Se guarda solo una huella SHA-256 con sal.
@@ -185,6 +193,11 @@ function unlockUI() {
   const quien = localStorage.getItem("oimira_admin_quien");
   const lb = $("logoutBtn");
   if (lb) { lb.title = quien ? "Entró: " + quien : "Entró con el PIN general"; if (quien && !$("adminQuien")) lb.insertAdjacentHTML("beforebegin", '<span id="adminQuien" class="text-xs opacity-90 mr-1">👤 ' + quien.split(" ")[0].replace(/[<>&]/g, "") + '</span>'); }
+  // 29/09/2026: si la sesión del servidor venció o le quitaron el permiso, volver a pedir el PIN
+  const tk = localStorage.getItem("oimira_admin_token");
+  if (tk && navigator.onLine) sbPagos.rpc("caja_sesion_ok", { p_token: tk, p_admin: true }).then(({ data, error }) => {
+    if (!error && data === false) { ["oimira_admin_token", "oimira_admin_pin_until", "oimira_admin_quien"].forEach((k) => localStorage.removeItem(k)); location.reload(); }
+  }).catch(() => {});
   init();
 }
 
@@ -1676,7 +1689,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-09-29.1";
+const APP_BUILD = "2026-09-29.2";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
