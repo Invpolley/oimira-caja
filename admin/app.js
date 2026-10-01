@@ -198,6 +198,7 @@ function unlockUI() {
   if (tk && navigator.onLine) sbPagos.rpc("caja_sesion_ok", { p_token: tk, p_admin: true }).then(({ data, error }) => {
     if (!error && data === false) { ["oimira_admin_token", "oimira_admin_pin_until", "oimira_admin_quien"].forEach((k) => localStorage.removeItem(k)); location.reload(); }
   }).catch(() => {});
+  try { mostrarBotonIngresar(); } catch (e) { /* */ }
   init();
 }
 
@@ -1689,7 +1690,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-09-30.2";
+const APP_BUILD = "2026-09-30.3";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
@@ -2886,6 +2887,68 @@ async function abrirRetiroDeteriorados() {
   actualizarResumenRetiro();
 }
 (function () { const b = document.getElementById("btnDeteriorados"); if (b) b.addEventListener("click", (e) => { e.stopPropagation(); abrirRetiroDeteriorados(); }); })();
+
+// ➕ INGRESAR DINERO (30/09/2026, pedido de Polley): SOLO EL DUEÑO. Sobrantes que entran a la caja.
+// El servidor (RPC caja_ingresar) verifica que el token sea del dueño; nadie más puede grabar montos negativos.
+// Se guarda en caja_retiro con monto NEGATIVO y motivo "Ingreso / sobrante de efectivo" (negativo = entra).
+async function mostrarBotonIngresar() {
+  const b = document.getElementById("ingresarDineroBtn"); if (!b) return;
+  const tk = localStorage.getItem("oimira_admin_token");
+  if (!tk || !navigator.onLine) { b.style.display = "none"; return; }
+  try {
+    const { data } = await sbPagos.rpc("caja_es_dueno", { p_token: tk });
+    b.style.display = data === true ? "" : "none";
+  } catch (e) { b.style.display = "none"; }
+}
+function abrirIngresarDinero() {
+  const canales = (state.canales || []).filter(c => c.activo !== false);
+  const opts = (canales.length ? canales : [{ key: "Efectivo", label: "Efectivo R$", moeda: "R$" }])
+    .map(c => `<option value="${escapeHtml(c.key)}" ${c.key === "Efectivo" ? "selected" : ""}>${escapeHtml((c.icon || "") + " " + c.label)} (${escapeHtml(c.moeda)})</option>`).join("");
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.6);display:grid;place-items:center;z-index:9999;padding:16px";
+  ov.innerHTML = `<div style="background:#fff;border-radius:16px;padding:18px;max-width:380px;width:100%;font-family:system-ui,sans-serif">
+    <div style="font-size:17px;font-weight:800;color:#065f46">➕ Ingresar dinero a la caja</div>
+    <div style="font-size:12px;color:#475569;margin:4px 0 10px">Solo tú ves este botón. Úsalo para sobrantes o dinero que entra a la caja fuera del cierre.</div>
+    <label style="font-size:12px;font-weight:600">Caja</label>
+    <select id="ing_canal" style="width:100%;padding:8px;border:2px solid #cbd5e1;border-radius:10px;margin-bottom:8px">${opts}</select>
+    <div style="display:flex;gap:8px">
+      <div style="flex:1"><label style="font-size:12px;font-weight:600">Monto</label>
+        <input id="ing_monto" type="number" step="0.01" min="0" placeholder="0.00" style="width:100%;box-sizing:border-box;padding:8px;border:2px solid #6ee7b7;border-radius:10px;font-size:18px;font-weight:700;text-align:right"></div>
+      <div><label style="font-size:12px;font-weight:600">Fecha</label>
+        <input id="ing_fecha" type="date" value="${todayISO()}" style="padding:8px;border:2px solid #cbd5e1;border-radius:10px"></div>
+    </div>
+    <label style="font-size:12px;font-weight:600;display:block;margin-top:8px">¿De dónde sale? *</label>
+    <input id="ing_nota" placeholder="Ej: sobrante de efectivo al contar la caja" style="width:100%;box-sizing:border-box;padding:8px;border:2px solid #cbd5e1;border-radius:10px">
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button id="ing_cancelar" style="flex:1;padding:10px;border:2px solid #cbd5e1;border-radius:10px;background:#fff;font-weight:600">Cancelar</button>
+      <button id="ing_guardar" style="flex:1;padding:10px;border:0;border-radius:10px;background:#059669;color:#fff;font-weight:700">Ingresar</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+  const cerrar = () => ov.remove();
+  ov.querySelector("#ing_cancelar").onclick = cerrar;
+  setTimeout(() => ov.querySelector("#ing_monto").focus(), 50);
+  ov.querySelector("#ing_guardar").onclick = async (ev) => {
+    const btn = ev.currentTarget;
+    const canal = ov.querySelector("#ing_canal").value, monto = Number(ov.querySelector("#ing_monto").value || 0);
+    const fecha = ov.querySelector("#ing_fecha").value, nota = ov.querySelector("#ing_nota").value.trim();
+    if (!(monto > 0)) return toast("Escribe el monto");
+    if (nota.length < 3) return toast("Escribe de dónde sale el dinero");
+    if (!navigator.onLine) return toast("📵 Sin conexión: para ingresar dinero hace falta señal");
+    btn.disabled = true; btn.textContent = "Guardando…";
+    try {
+      const { data, error } = await sbPagos.rpc("caja_ingresar", { p_token: localStorage.getItem("oimira_admin_token"), p_fecha: fecha, p_canal: canal, p_monto: monto, p_nota: nota });
+      if (error) throw error;
+      await propagarSaldoAlDiaSiguiente(fecha);
+      toast(`✅ Ingresado ${fmtMoeda(monto, data.moeda)} a ${canalLabel(canal)}`, 5000);
+      cerrar(); reload();
+    } catch (e) { toast("No se ingresó: " + (e.message || e), 6000); btn.disabled = false; btn.textContent = "Ingresar"; }
+  };
+}
+(function () {
+  const b = document.getElementById("ingresarDineroBtn");
+  if (b) b.addEventListener("click", abrirIngresarDinero);
+  mostrarBotonIngresar();
+})();
 
 // Sello visible. Usa la MISMA constante que el service worker para que no puedan
 // contradecirse: era justo el bug que hacía parecer que la app no se actualizaba.
