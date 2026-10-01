@@ -1692,7 +1692,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-10-01.1";
+const APP_BUILD = "2026-10-01.2";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
@@ -2186,6 +2186,8 @@ async function cargarCierreCaja(fecha) {
 
   // 2. Datos de la cajera para esta fecha (auto-fill source)
   const autofill = await fetchDiaCierreAutofill(fecha);
+  // 01/10/2026: cierre anterior para avisar si el saldo inicial no coincide (ej. R$ 207 restados dos veces el 30/09)
+  CC_PREV = await fetchUltimoSaldo(fecha);
 
   const banner = $("cc_modeBanner");
   banner.classList.remove("hidden");
@@ -2214,7 +2216,7 @@ async function cargarCierreCaja(fecha) {
     banner.innerHTML = "✏️ <b>Editando cierre existente</b> del " + fmtFecha(fecha) + " — los cambios sobrescriben el registro guardado.";
   } else {
     // Modo NUEVO — autocompletar saldos_ant del día anterior + hoy desde cajera
-    const last = await fetchUltimoSaldo(fecha);
+    const last = CC_PREV;
     if (last) {
       $("cc_efectivo_ant").value     = last.efectivo_saldo_total || 0;
       $("cc_pix_ant").value          = last.pix_saldo_total || 0;
@@ -2344,7 +2346,45 @@ async function resyncDesdeCajera() {
   toast("Re-sincronizado desde lo que reportó la cajera");
 }
 
+// ⚠️ Aviso: saldo inicial distinto al cierre anterior (01/10/2026, pedido de Polley)
+let CC_PREV = null;
+const CC_ANT_CAMPOS = [
+  ["cc_efectivo_ant", "efectivo_saldo_total", "💵 Efectivo R$", "R$"],
+  ["cc_pix_ant", "pix_saldo_total", "PIX", "R$"],
+  ["cc_puntobr_ant", "punto_br_saldo_total", "Punto Br", "R$"],
+  [["cc_pago_movil_ant", "cc_banesco_pos_ant"], ["pago_movil_saldo_total", "banesco_pos_saldo_total"], "🏦 Banesco Bs (Pago Móvil + POS)", "Bs"],
+  ["cc_bs_efectivo_ant", "bs_efectivo_saldo_total", "Bs efectivo", "Bs"],
+  ["cc_usd_ant", "usd_saldo_total", "USD", "USD"],
+];
+function ccDiferenciasAnt() {
+  if (!CC_PREV) return [];
+  const sum = (ids, src) => [].concat(ids).reduce((t, k) => t + Number(src(k) || 0), 0);
+  const out = [];
+  CC_ANT_CAMPOS.forEach(([ids, cols, nombre, m]) => {
+    const escrito = sum(ids, (id) => $(id) && $(id).value);
+    const esperado = sum(cols, (c) => CC_PREV[c]);
+    const dif = Math.round((escrito - esperado) * 100) / 100;
+    if (Math.abs(dif) > 0.009) out.push({ nombre, m, escrito, esperado, dif });
+  });
+  return out;
+}
+function ccAvisoAnt() {
+  let el = $("cc_avisoAnt");
+  if (!el) {
+    const banner = $("cc_modeBanner"); if (!banner) return;
+    el = document.createElement("div"); el.id = "cc_avisoAnt";
+    banner.insertAdjacentElement("afterend", el);
+  }
+  const difs = ccDiferenciasAnt();
+  if (!difs.length) { el.innerHTML = ""; el.className = ""; return; }
+  el.className = "mb-3 px-3 py-2 rounded-lg text-xs border-2 bg-red-50 border-red-400 text-red-900";
+  el.innerHTML = `⚠️ <b>El saldo inicial no coincide con el cierre del ${fmtFecha(CC_PREV.fecha)}:</b><br>` +
+    difs.map(d => `${escapeHtml(d.nombre)}: escribiste <b>${fmtMoeda(d.escrito, d.m)}</b>, el cierre anterior terminó en <b>${fmtMoeda(d.esperado, d.m)}</b> → diferencia <b>${d.dif > 0 ? "+" : ""}${fmtMoeda(d.dif, d.m)}</b>`).join("<br>") +
+    `<br><span class="text-[11px]">Si sacaste o metiste dinero, mejor regístralo como 💸 Retiro o ➕ Ingresar y deja el saldo inicial igual al cierre anterior (si no, se descuenta dos veces).</span>`;
+}
+
 function recalcCC() {
+  try { ccAvisoAnt(); } catch (e) { /* */ }
   // Efectivo R$ (con gastos)
   const efAnt = Number($("cc_efectivo_ant").value) || 0;
   const efHoy = Number($("cc_efectivo_hoy").value) || 0;
@@ -2413,6 +2453,10 @@ async function guardarCierreCaja() {
       updated_at: new Date().toISOString(),
     };
     if (!payload.fecha) { toast("Poné una fecha"); return; }
+    const difsAnt = ccDiferenciasAnt();
+    if (difsAnt.length && !confirm("⚠️ El saldo inicial no coincide con el cierre anterior:\n\n" +
+        difsAnt.map(d => `${d.nombre}: diferencia ${d.dif > 0 ? "+" : ""}${fmtMoeda(d.dif, d.m)}`).join("\n") +
+        "\n\n¿Guardar igual?")) return;
 
     const { error } = await sb.from("caja_saldo").upsert(payload, { onConflict: "fecha" });
     if (error) { toast("Error: " + error.message, 4000); return; }
