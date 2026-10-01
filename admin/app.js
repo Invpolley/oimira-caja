@@ -1689,7 +1689,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-09-30.1";
+const APP_BUILD = "2026-09-30.2";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
@@ -2639,6 +2639,14 @@ async function guardarRetiro() {
   if (!canal) { toast("Elegí de qué caja sale"); return; }
   if (!monto || monto <= 0) { toast("Monto inválido"); return; }
   if (!nota || nota.length < 3) { toast("Poné una nota de en qué se usó el dinero"); return; }
+  // 30/09: si es efectivo y aún quedan billetes deteriorados, preguntar si este retiro es de esos billetes
+  // (un retiro de 207 se guardó como "Retiro propio" y la tarjeta de deteriorados no bajó)
+  if (canal === "Efectivo" && DET_DISPONIBLE > 0 && !MOTIVOS_DETERIORADOS.includes($("rt_motivo").value)
+      && /deterior|viej|billete|da[ñn]ad|dep[oó]sit|banco/i.test(nota + " " + $("rt_destino").value)) {
+    if (confirm(`¿Este retiro es de los BILLETES DETERIORADOS? (hay ${fmtR(DET_DISPONIBLE)})\n\nAceptar = Sí, descontarlo de los deteriorados\nCancelar = No, es efectivo normal`)) {
+      $("rt_motivo").value = confirm("¿Fue un DEPÓSITO al banco?\n\nAceptar = Depósito al banco\nCancelar = Gasto / pago con esos billetes") ? MOTIVOS_DETERIORADOS[0] : MOTIVOS_DETERIORADOS[1];
+    }
+  }
   if (MOTIVOS_DETERIORADOS.includes($("rt_motivo").value)) {
     if (canal !== "Efectivo") { toast("Los billetes deteriorados salen de Efectivo R$"); return; }
     if (monto > DET_DISPONIBLE + 0.005) { toast(`⛔ Solo hay ${fmtR(DET_DISPONIBLE)} en billetes deteriorados`, 5000); return; }
