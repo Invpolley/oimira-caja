@@ -100,6 +100,8 @@ const CANALES_FALLBACK = [
   { key: "USD",      label: "USD",         moeda: "USD", icon: "💵", orden: 4, activo: true },
   { key: "BCU",      label: "BCU",         moeda: "Bs",  icon: "🏦", orden: 5, activo: true },
 ];
+// Saldo de la cuenta Banesco (Pago Móvil + POS juntos)
+function bancoBs(r) { return Number((r && r.pago_movil_saldo_total) || 0) + Number((r && r.banesco_pos_saldo_total) || 0); }
 function canalDef(key) {
   return (state.canales || []).find(c => c.key === key)
       || CANALES_FALLBACK.find(c => c.key === key)
@@ -1690,7 +1692,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-09-30.3";
+const APP_BUILD = "2026-10-01.1";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
@@ -1934,13 +1936,12 @@ function renderCajaSaldos() {
   $("cajaPuntoBr").textContent = fmtR(latest.punto_br_saldo_total);
   $("cajaPuntoBrDetail").textContent = `ant ${fmtN(latest.punto_br_saldo_ant)} + hoy ${fmtN(latest.punto_br_hoy)}`;
 
-  // Pago Móvil Banesco (Bs)
-  $("cajaPagoMovil").textContent = fmtB(latest.pago_movil_saldo_total);
-  $("cajaPagoMovilDetail").textContent = `ant ${fmtN(latest.pago_movil_saldo_ant)} + hoy ${fmtN(latest.pago_movil_hoy)}`;
-
-  // Banesco POS Bs
+  // 🏦 Banesco Bs UNIFICADO (01/10/2026, Polley): Pago Móvil y Banesco POS caen en la MISMA cuenta bancaria.
+  // Saldo = suma de las dos columnas; Pago Móvil y POS del día quedan solo como referencia.
+  $("cajaPagoMovil").textContent = fmtB(bancoBs(latest));
+  $("cajaPagoMovilDetail").textContent = `ant ${fmtN(Number(latest.pago_movil_saldo_ant || 0) + Number(latest.banesco_pos_saldo_ant || 0))} + hoy: Pago Móvil ${fmtN(latest.pago_movil_hoy)} · POS ${fmtN(latest.banesco_pos_hoy)}`;
   $("cajaBanescoPos").textContent = fmtB(latest.banesco_pos_saldo_total);
-  $("cajaBanescoPosDetail").textContent = `ant ${fmtN(latest.banesco_pos_saldo_ant)} + hoy ${fmtN(latest.banesco_pos_hoy)}`;
+  $("cajaBanescoPosDetail").textContent = "";
 
   // Bs efectivo
   $("cajaBsEfectivo").textContent = fmtB(latest.bs_efectivo_saldo_total);
@@ -2558,8 +2559,8 @@ function renderSaldosEnCanales() {
     Efectivo:   [latest.efectivo_saldo_total,    "R$"],
     PIX:        [latest.pix_saldo_total,         "R$"],
     PuntoBr:    [latest.punto_br_saldo_total,    "R$"],
-    PagoMovil:  [latest.pago_movil_saldo_total,  "Bs"],
-    BanescoPos: [latest.banesco_pos_saldo_total, "Bs"],
+    PagoMovil:  [bancoBs(latest), "Bs"],
+    BanescoPos: [bancoBs(latest), "Bs"],
     BsEfectivo: [latest.bs_efectivo_saldo_total, "Bs"],
     USD:        [latest.usd_saldo_total,         "USD"],
   };
@@ -2586,8 +2587,8 @@ function selectCanal(canal) {
       Efectivo:   latest.efectivo_saldo_total,
       PIX:        latest.pix_saldo_total,
       PuntoBr:    latest.punto_br_saldo_total,
-      PagoMovil:  latest.pago_movil_saldo_total,
-      BanescoPos: latest.banesco_pos_saldo_total,
+      PagoMovil:  bancoBs(latest),
+      BanescoPos: bancoBs(latest),
       BsEfectivo: latest.bs_efectivo_saldo_total,
       USD:        latest.usd_saldo_total,
     };
@@ -2666,8 +2667,8 @@ async function guardarRetiro() {
       Efectivo:   latest.efectivo_saldo_total,
       PIX:        latest.pix_saldo_total,
       PuntoBr:    latest.punto_br_saldo_total,
-      PagoMovil:  latest.pago_movil_saldo_total,
-      BanescoPos: latest.banesco_pos_saldo_total,
+      PagoMovil:  bancoBs(latest),
+      BanescoPos: bancoBs(latest),
       BsEfectivo: latest.bs_efectivo_saldo_total,
       USD:        latest.usd_saldo_total,
     };
