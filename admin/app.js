@@ -2019,7 +2019,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-10-04.4";
+const APP_BUILD = "2026-10-04.5";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
