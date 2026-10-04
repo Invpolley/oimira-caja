@@ -248,7 +248,7 @@
   <button id="alertaStockBannerBtn" class="w-full text-left bg-red-50 border-2 border-red-300 rounded-xl p-3 flex items-start gap-3 hover:bg-red-100 transition">
     <span class="text-2xl leading-none">⚠️</span>
     <span class="flex-1">
-      <span class="block font-bold text-red-800 text-sm">Stock de trigo bajo</span>
+      <span class="block font-bold text-red-800 text-sm">Es hora de comprar trigo</span>
       <span id="alertaStockBannerTexto" class="block text-xs text-red-700 mt-0.5"></span>
     </span>
     <span class="text-red-400 text-xl leading-none">&rsaquo;</span>
@@ -634,23 +634,41 @@
     </div>
   </div>
 
-  <!-- 🕓 Historial de cambios (04/10/2026): nada se pierde, todo se puede consultar y lo borrado se recupera -->
-  <div class="tab-panel bg-white rounded-xl p-3 card" data-panel="ajustes">
-    <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
-      <h2 class="text-base font-bold text-amber-800">🕓 Historial de cambios</h2>
-      <select id="histFiltro" class="p-1.5 border-2 border-gray-300 rounded text-sm">
-        <option value="">Todo</option>
-        <option value="borrados">Solo lo borrado</option>
-        <option value="dia_cierre">Cierres</option>
-        <option value="caja_retiro">Retiros</option>
-        <option value="caja_saldo">Saldos</option>
-        <option value="dia_gasto">Gastos</option>
-        <option value="saco_producto,saco_compra">Trigo</option>
-      </select>
+  <!-- 🕓 Movimientos (04/10/2026): solo administradores con el permiso "Ver movimientos y restaurar" -->
+  <div id="movAcceso" class="tab-panel hidden bg-white rounded-xl p-3 card" data-panel="ajustes">
+    <button type="button" id="movAbrir" class="w-full flex items-center gap-3 text-left">
+      <span class="text-3xl">🕓</span>
+      <span class="flex-1"><span class="block font-bold text-amber-800">Movimientos</span>
+        <span class="block text-xs text-gray-500">Todo lo que se creó, cambió o borró, con quién y cuándo. Desde aquí se restaura.</span></span>
+      <span class="text-amber-500 text-2xl">›</span>
+    </button>
+  </div>
+
+  <div class="tab-panel space-y-2" data-panel="movimientos">
+    <div class="bg-white rounded-xl p-3 card">
+      <div class="flex items-center justify-between gap-2">
+        <button type="button" id="movVolver" class="text-sm font-semibold text-amber-700">‹ Ajustes</button>
+        <h2 class="text-base font-bold text-amber-800">🕓 Movimientos</h2>
+        <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold">🔒 Admin</span>
+      </div>
+      <div class="flex gap-1 mt-2">
+        <select id="histFiltro" class="flex-1 p-1.5 border-2 border-gray-300 rounded text-sm">
+          <option value="">Todos</option>
+          <option value="dia_cierre">Cierres</option>
+          <option value="caja_retiro">Retiros</option>
+          <option value="caja_saldo">Saldos de caja</option>
+          <option value="saco_producto,saco_compra">Trigo</option>
+          <option value="cajera,canal_caja,categoria_gasto,forma_pago_catalogo,saco_peso,saco_tipo">Catálogos</option>
+          <option value="dia_gasto,dia_saco,forma_pago_extra">Gastos y sacos de los cierres</option>
+        </select>
+        <select id="histOp" class="p-1.5 border-2 border-gray-300 rounded text-sm">
+          <option value="">Todo</option><option value="INSERT">Nuevos</option><option value="UPDATE">Cambios</option><option value="DELETE">Borrados</option>
+        </select>
+      </div>
+      <p class="text-[11px] text-gray-500 mt-1">↩ <b>Restaurar</b>: un cambio vuelve a como estaba; algo borrado se vuelve a crear; algo nuevo se deshace.</p>
     </div>
-    <p class="text-[11px] text-gray-500 mb-2">Cada cambio queda guardado con quién lo hizo y cuándo. Lo borrado se puede <b>restaurar</b>.</p>
-    <div id="histLista" class="space-y-1 text-sm"><div class="text-xs text-gray-400">Abre esta pestaña para cargar el historial.</div></div>
-    <button type="button" id="histMas" class="hidden mt-2 w-full py-2 border-2 border-gray-300 rounded-lg text-sm font-semibold">Ver más</button>
+    <div id="histLista" class="space-y-1.5 text-sm"></div>
+    <button type="button" id="histMas" class="hidden w-full py-2 bg-white border-2 border-gray-300 rounded-lg text-sm font-semibold">Ver más</button>
   </div>
 
   <!-- ⚙️ Configuración (avanzado) — separada del uso diario -->
@@ -697,12 +715,12 @@
   <div id="modalAlertaStock" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3">
     <div class="bg-white rounded-2xl p-4 max-w-sm w-full max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-1">
-        <h2 class="text-lg font-bold text-red-700">⚠️ Stock de trigo bajo</h2>
+        <h2 class="text-lg font-bold text-red-700">🛒 Es hora de comprar trigo</h2>
         <button class="close-modal text-2xl text-gray-400 hover:text-gray-700" data-modal="modalAlertaStock">&times;</button>
       </div>
-      <p class="text-xs text-gray-500 mb-3">Estos sacos llegaron al mínimo que configuraste. Conviene reponer.</p>
+      <p class="text-xs text-gray-500 mb-3">Estos sacos llegaron al mínimo que configuraste.</p>
       <div id="alertaStockLista" class="space-y-2"></div>
-      <button id="alertaStockAjustar" class="mt-4 w-full py-3 bg-amber-600 text-white rounded-xl font-bold">Ajustar existencia o mínimos</button>
+      <button id="alertaStockAjustar" class="mt-4 w-full py-3 bg-emerald-600 text-white rounded-xl font-bold">🛒 Es hora de comprar · registrar la compra</button>
       <button class="close-modal mt-2 w-full py-2.5 text-gray-500 text-sm" data-modal="modalAlertaStock">Entendido</button>
     </div>
   </div>
@@ -1105,7 +1123,7 @@
 <div id="toast" class="hidden fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-2xl z-50 text-sm font-medium"></div>
 
 <script type="module" src="app.js"></script>
-<div style='position:fixed;bottom:64px;right:9px;font-size:10px;color:#9aa0a6;opacity:.65;pointer-events:none;z-index:99999'>v2026-10-04.1</div>
+<div style='position:fixed;bottom:64px;right:9px;font-size:10px;color:#9aa0a6;opacity:.65;pointer-events:none;z-index:99999'>v2026-10-04.2</div>
 <script>
 /* PWA-RESILIENTE: ping al hosting (el SW deja pasar ?ping=) + estado de red */
 (function(){

@@ -1485,7 +1485,8 @@ function init() {
   const _ab = $("alertaStockBannerBtn");
   if (_ab) _ab.addEventListener("click", abrirAlertaStock);
   const _aa = $("alertaStockAjustar");
-  if (_aa) _aa.addEventListener("click", () => { closeModal("modalAlertaStock"); openAjusteStock(); });
+  // 04/10/2026 (pedido de Polley): el aviso no ofrece ajustar existencia, ofrece COMPRAR
+  if (_aa) _aa.addEventListener("click", () => { closeModal("modalAlertaStock"); openCompra(); });
 
   document.querySelectorAll(".chart-btn").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -1553,13 +1554,14 @@ function mostrarTab(t) {
     const en = (p.dataset.panel || "").split(/\s+/).includes(t);
     p.classList.toggle("tab-oculto", !en);
   });
-  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("activa", b.dataset.tab === t));
+  const tabBarra = t === "movimientos" ? "ajustes" : t; // Movimientos vive dentro de Ajustes
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("activa", b.dataset.tab === tabBarra));
   window.scrollTo(0, 0);
   // Los gráficos dibujados mientras su pestaña estaba oculta quedan en 0×0: se reajustan al mostrarse
   requestAnimationFrame(() => {
     try { const C = window.Chart; if (C && C.instances) Object.values(C.instances).forEach(ch => { try { ch.resize(); } catch (e) { /* */ } }); } catch (e) { /* */ }
   });
-  if (t === "ajustes") cargarHistorial(true);
+  if (t === "movimientos") { if (PUEDE_MOV) cargarHistorial(true); else mostrarTab("ajustes"); }
 }
 function wirePestanas() {
   document.querySelectorAll(".tab-btn").forEach(b => b.addEventListener("click", () => mostrarTab(b.dataset.tab)));
@@ -1715,9 +1717,10 @@ async function cargarResumen() {
 }
 
 // ============================================================
-// 🕓 Historial de cambios (bitácora oimira_caja.historial, solo lectura) + Restaurar lo borrado
+// 🕓 Movimientos (bitácora oimira_caja.historial) — SOLO administradores con el permiso
+// "Ver movimientos y restaurar" (caja_movimientos, o el dueño). La base de datos lo exige también (RLS + RPC).
 // ============================================================
-const HIST_NOMBRE = { dia_cierre: "Cierre", dia_gasto: "Gasto", dia_saco: "Sacos del cierre", forma_pago_extra: "Forma de pago del cierre",
+const HIST_NOMBRE = { dia_cierre: "Cierre", dia_gasto: "Gasto de un cierre", dia_saco: "Sacos de un cierre", forma_pago_extra: "Forma de pago de un cierre",
   caja_retiro: "Retiro", caja_saldo: "Saldo de caja", saco_compra: "Compra de trigo", saco_producto: "Saco (catálogo)", cajera: "Cajera",
   canal_caja: "Canal", categoria_gasto: "Categoría", forma_pago_catalogo: "Forma de pago", saco_peso: "Peso de saco", saco_tipo: "Tipo de saco", admin_unlock_code: "Código de edición" };
 const HIST_CAMPO = { pix_rs: "PIX", dinheiro_rs: "Efectivo", ventas_efectivo_rs: "Venta efectivo", debito_rs: "Débito", pago_movil_bs: "Pago Móvil",
@@ -1725,63 +1728,87 @@ const HIST_CAMPO = { pix_rs: "PIX", dinheiro_rs: "Efectivo", ventas_efectivo_rs:
   moeda: "Moneda", motivo: "Motivo", destino: "Destino", nota: "Nota", canal: "Canal", fecha: "Fecha", stock_base: "Existencia", stock_min: "Mínimo",
   activo: "Visible", tasa_bs_rs: "Tasa Bs", tasa_usd_rs: "Tasa USD", efectivo_deteriorado_rs: "Deteriorado", nombre: "Nombre", label: "Nombre visible",
   cantidad: "Cantidad", precio_unit: "Precio", costo: "Costo" };
-const HIST_RESTAURABLE = ["caja_retiro", "saco_compra", "caja_saldo"];
 const HIST_HIJOS = ["dia_gasto", "dia_saco", "forma_pago_extra"];
-let HIST_LIM = 40;
+let HIST_LIM = 50;
+let PUEDE_MOV = false;
 function _histResumen(h) {
   const r = h.despues || h.antes || {};
   if (h.op === "UPDATE" && h.antes && h.despues) {
-    const ign = ["updated_at", "transmitted_at", "submitted_at", "device"];
+    const ign = ["updated_at", "transmitted_at", "submitted_at", "device", "stock_ajustado_at", "stock_consumo_incluido", "stock_compras_incluidas"];
     const cambios = Object.keys(h.despues).filter(k => !ign.includes(k) && JSON.stringify(h.antes[k]) !== JSON.stringify(h.despues[k]));
-    if (!cambios.length) return "sin cambios visibles";
-    return cambios.slice(0, 4).map(k => `${HIST_CAMPO[k] || k}: ${h.antes[k] ?? "—"} → ${h.despues[k] ?? "—"}`).join(" · ") + (cambios.length > 4 ? " …" : "");
+    const cab = r.fecha ? fmtFecha(r.fecha) + " · " : (r.label || r.nombre ? (r.label || r.nombre) + " · " : "");
+    if (!cambios.length) return cab + "sin cambios visibles";
+    return cab + cambios.slice(0, 4).map(k => `${HIST_CAMPO[k] || k}: ${h.antes[k] ?? "—"} → ${h.despues[k] ?? "—"}`).join(" · ") + (cambios.length > 4 ? " …" : "");
   }
   const partes = [];
   if (r.fecha) partes.push(fmtFecha(r.fecha));
   if (r.monto != null) partes.push(fmtMoeda(r.monto, r.moeda));
   if (r.cantidad != null) partes.push(r.cantidad + " u");
-  ["motivo", "descripcion", "nombre", "label", "cajera", "tipo"].forEach(k => { if (r[k]) partes.push(String(r[k])); });
+  ["motivo", "descripcion", "nombre", "label", "cajera", "tipo", "canal"].forEach(k => { if (r[k]) partes.push(String(r[k])); });
   return partes.join(" · ");
+}
+function _histRestaurable(h) {
+  if (HIST_HIJOS.includes(h.tabla) || h.tabla === "admin_unlock_code") return false;
+  if (h.op === "INSERT" && h.tabla === "dia_cierre") return false;
+  return true;
+}
+async function verificarPermisoMovimientos() {
+  try {
+    const { data, error } = await sbPagos.rpc("caja_puede_movimientos");
+    PUEDE_MOV = !error && data === true;
+  } catch (e) { PUEDE_MOV = false; }
+  const a = $("movAcceso"); if (a) a.classList.toggle("hidden", !PUEDE_MOV);
 }
 async function cargarHistorial(reiniciar) {
   const cont = $("histLista"); if (!cont) return;
-  if (reiniciar) HIST_LIM = 40;
+  if (!PUEDE_MOV) { cont.innerHTML = '<div class="rs-card text-sm text-red-700">🔒 Esta área es solo para administradores.</div>'; return; }
+  if (reiniciar) HIST_LIM = 50;
   const f = ($("histFiltro") && $("histFiltro").value) || "";
+  const op = ($("histOp") && $("histOp").value) || "";
   let q = sb.from("historial").select("*").order("id", { ascending: false }).limit(HIST_LIM);
-  if (f === "borrados") q = q.eq("op", "DELETE").in("tabla", HIST_RESTAURABLE);
-  else if (f) q = q.in("tabla", f.split(","));
+  if (f) q = q.in("tabla", f.split(","));
   else q = q.not("tabla", "in", "(" + HIST_HIJOS.join(",") + ")");
-  cont.innerHTML = '<div class="text-xs text-gray-400">Cargando…</div>';
+  if (op) q = q.eq("op", op);
+  cont.innerHTML = '<div class="text-xs text-gray-500 text-center py-4">Cargando movimientos…</div>';
   const { data, error } = await q;
-  if (error) { cont.innerHTML = `<div class="text-xs text-red-700">No se pudo leer el historial: ${escapeHtml(error.message)}</div>`; return; }
+  if (error) { cont.innerHTML = `<div class="rs-card text-xs text-red-700">No se pudo leer: ${escapeHtml(error.message)}</div>`; return; }
   const lista = data || [];
-  if (!lista.length) { cont.innerHTML = '<div class="text-xs text-gray-500 italic">Todavía no hay cambios registrados con este filtro. (El historial empezó el 04/10/2026.)</div>'; $("histMas").classList.add("hidden"); return; }
-  const ICO = { INSERT: "🆕", UPDATE: "✏️", DELETE: "🗑", ARCHIVAR: "🗂" };
+  if (!lista.length) { cont.innerHTML = '<div class="rs-card text-xs text-gray-500 italic">No hay movimientos con este filtro. (Se registran desde el 04/10/2026.)</div>'; $("histMas").classList.add("hidden"); return; }
+  const ICO = { INSERT: "🆕", UPDATE: "✏️", DELETE: "🗑" };
+  const VERBO = { INSERT: "nuevo", UPDATE: "cambiado", DELETE: "borrado" };
+  const COLOR = { INSERT: "border-emerald-200", UPDATE: "border-amber-200", DELETE: "border-red-300 bg-red-50" };
   cont.innerHTML = lista.map(h => {
-    const cuando = new Date(h.ts).toLocaleString("es-VE", { timeZone: APP_TZ, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-    const puede = h.op === "DELETE" && HIST_RESTAURABLE.includes(h.tabla);
-    return `<div class="p-2 rounded-lg border ${h.op === "DELETE" ? "border-red-200 bg-red-50" : "border-gray-200 bg-gray-50"}">
-      <div class="flex justify-between gap-2"><b class="text-xs">${ICO[h.op] || "•"} ${HIST_NOMBRE[h.tabla] || h.tabla} · ${h.op === "INSERT" ? "nuevo" : h.op === "UPDATE" ? "editado" : "borrado"}</b>
-        <span class="text-[10px] text-gray-500 whitespace-nowrap">${cuando}</span></div>
-      <div class="text-xs text-gray-700 break-words">${escapeHtml(_histResumen(h))}</div>
-      <div class="flex justify-between items-center"><span class="text-[10px] text-gray-500">👤 ${escapeHtml(h.usuario || "sistema")}</span>
-        ${puede ? `<button type="button" class="hist-rest text-xs font-semibold px-2 py-1 rounded bg-emerald-600 text-white" data-id="${h.id}">↩ Restaurar</button>` : ""}</div>
+    const cuando = new Date(h.ts).toLocaleString("es-VE", { timeZone: APP_TZ, day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+    const boton = _histRestaurable(h)
+      ? `<button type="button" class="hist-rest shrink-0 self-center text-xs font-bold px-3 py-2 rounded-lg bg-emerald-600 text-white" data-id="${h.id}" data-op="${h.op}">↩ Restaurar</button>`
+      : `<span class="shrink-0 self-center text-[10px] text-gray-400 w-16 text-center">${HIST_HIJOS.includes(h.tabla) ? "se corrige editando el cierre" : "—"}</span>`;
+    return `<div class="flex gap-2 bg-white rounded-xl p-2.5 border-2 ${COLOR[h.op] || "border-gray-200"}">
+      <div class="flex-1 min-w-0">
+        <div class="text-xs font-bold">${ICO[h.op] || "•"} ${HIST_NOMBRE[h.tabla] || h.tabla} · ${VERBO[h.op] || h.op}</div>
+        <div class="text-xs text-gray-700 break-words">${escapeHtml(_histResumen(h))}</div>
+        <div class="text-[10px] text-gray-500 mt-0.5">👤 ${escapeHtml(h.usuario || "sistema")} · ${cuando}</div>
+      </div>
+      ${boton}
     </div>`;
   }).join("");
   $("histMas").classList.toggle("hidden", lista.length < HIST_LIM);
+  const QUE = { UPDATE: "Volverá a quedar como estaba ANTES de este cambio.", DELETE: "Se volverá a crear tal como estaba antes de borrarlo.", INSERT: "Se deshará (se quita lo que se creó)." };
   cont.querySelectorAll(".hist-rest").forEach(b => b.addEventListener("click", async () => {
-    if (!confirm("¿Restaurar este registro tal como estaba antes de borrarlo?")) return;
-    b.disabled = true; b.textContent = "Restaurando…";
-    const { error: e2 } = await sbPagos.rpc("caja_historial_restaurar", { p_historial_id: Number(b.dataset.id) });
-    if (e2) { toast("No se pudo restaurar: " + e2.message, 4500); b.disabled = false; b.textContent = "↩ Restaurar"; return; }
-    toast("✅ Restaurado");
+    if (!confirm("¿Restaurar este movimiento?\n\n" + (QUE[b.dataset.op] || "") + "\n\nEsto también queda registrado en Movimientos.")) return;
+    b.disabled = true; b.textContent = "…";
+    const { data: msg, error: e2 } = await sbPagos.rpc("caja_historial_restaurar", { p_historial_id: Number(b.dataset.id) });
+    if (e2) { toast("No se pudo restaurar: " + e2.message, 5000); b.disabled = false; b.textContent = "↩ Restaurar"; return; }
+    toast("✅ " + (msg || "Restaurado"));
     await reload();
     cargarHistorial(true);
   }));
 }
 function wireHistorial() {
-  const f = $("histFiltro"); if (f) f.addEventListener("change", () => cargarHistorial(true));
-  const m = $("histMas"); if (m) m.addEventListener("click", () => { HIST_LIM += 40; cargarHistorial(false); });
+  ["histFiltro", "histOp"].forEach(id => { const f = $(id); if (f) f.addEventListener("change", () => cargarHistorial(true)); });
+  const m = $("histMas"); if (m) m.addEventListener("click", () => { HIST_LIM += 50; cargarHistorial(false); });
+  const ab = $("movAbrir"); if (ab) ab.addEventListener("click", () => mostrarTab("movimientos"));
+  const vo = $("movVolver"); if (vo) vo.addEventListener("click", () => mostrarTab("ajustes"));
+  verificarPermisoMovimientos();
 }
 
 // ============================================================
@@ -1960,7 +1987,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-10-04.1";
+const APP_BUILD = "2026-10-04.2";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
