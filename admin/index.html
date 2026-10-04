@@ -260,6 +260,11 @@
   <!-- ===================== -->
   <!-- 🏠 RESUMEN (04/10/2026) — lo primero que ve el dueño -->
   <!-- ===================== -->
+  <div class="tab-panel" data-panel="sinpermiso">
+    <div class="rs-card text-center py-8"><div class="text-4xl mb-2">🔒</div><p class="font-bold text-amber-900">Todavía no tienes secciones asignadas</p>
+      <p class="text-sm text-gray-600 mt-1">El dueño decide qué puede ver cada administrador en config.fitmassa.com → 👥 Accesos.</p></div>
+  </div>
+
   <div class="tab-panel space-y-3" data-panel="resumen">
     <div id="resumenCont" class="space-y-3">
       <div class="text-center text-gray-500 py-8"><div class="text-4xl mb-2 animate-pulse">⏳</div><p class="text-sm">Preparando el resumen…</p></div>
@@ -731,8 +736,8 @@
         <h2 class="text-lg font-bold text-amber-800">📦 Ajustar existencia</h2>
         <button class="close-modal text-2xl text-gray-400 hover:text-gray-700" data-modal="modalAjusteStock">&times;</button>
       </div>
-      <p class="text-xs text-gray-500 mb-3">Poné el stock actual de cada saco (conteo físico). Desde hoy, el consumo de la caja se resta solo. <b>"mín"</b> = cuántos sacos deben quedar para que el sistema te avise al entrar (por defecto 20).</p>
-      <div class="flex gap-2 text-[10px] text-gray-400 font-bold px-1"><span class="flex-1">Saco</span><span class="w-20 text-center">stock</span><span class="w-16 text-center">mín</span></div>
+      <p class="text-xs text-gray-500 mb-3">Poné el stock actual de cada saco (conteo físico). Desde ese momento el consumo de la caja se resta solo. El <b>mínimo</b> para el aviso "Es hora de comprar" lo pone el dueño en config.fitmassa.com → 🧾 Caja.</p>
+      <div class="flex gap-2 text-[10px] text-gray-400 font-bold px-1"><span class="flex-1">Saco</span><span class="w-20 text-center">stock</span></div>
       <div id="ajusteStockList" class="space-y-2 mt-1"></div>
       <button id="ajusteStockGuardar" class="mt-3 w-full py-3 bg-amber-600 text-white rounded-xl font-bold">Guardar existencia</button>
     </div>
@@ -1123,7 +1128,7 @@
 <div id="toast" class="hidden fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-2xl z-50 text-sm font-medium"></div>
 
 <script type="module" src="app.js"></script>
-<div style='position:fixed;bottom:64px;right:9px;font-size:10px;color:#9aa0a6;opacity:.65;pointer-events:none;z-index:99999'>v2026-10-04.2</div>
+<div style='position:fixed;bottom:64px;right:9px;font-size:10px;color:#9aa0a6;opacity:.65;pointer-events:none;z-index:99999'>v2026-10-04.3</div>
 <script>
 /* PWA-RESILIENTE: ping al hosting (el SW deja pasar ?ping=) + estado de red */
 (function(){

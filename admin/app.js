@@ -1148,11 +1148,15 @@ function renderSacosAnalitica() {
 let _alertaStockYaMostrada = false;   // el aviso emergente sale una vez por sesion
 
 function sacosBajoMinimo() {
+  // 04/10/2026: el mínimo de sacos y los días de aviso se ponen en config.fitmassa.com → 🧾 Caja
+  if (!puedeVer("trigo")) return [];
+  const diasAlerta = Number((MIS && MIS.ajustes && MIS.ajustes.trigo_dias_alerta) ?? 7) || 0;
   return (state.sacoProductos || []).filter(p => {
     if (p.activo === false) return false;
     const min = Number(p.stock_min) || 0;
-    if (min <= 0) return false;               // sin minimo definido, no molesta
-    return _stockActual(p) <= min;
+    if (min > 0 && _stockActual(p) <= min) return true;
+    const d = p.dias_de_cobertura;
+    return diasAlerta > 0 && d != null && Number(d) >= 0 && Number(d) < diasAlerta;
   });
 }
 
@@ -1169,7 +1173,7 @@ function renderAlertaStock() {
   // Banner permanente: queda visible mientras el stock siga bajo.
   if (banner && texto) {
     texto.textContent = bajos
-      .map(p => (p.label || (p.nombre + " " + p.kg + "kg")) + ": quedan " + _stockActual(p) + " (mín " + p.stock_min + ")")
+      .map(p => (p.label || (p.nombre + " " + p.kg + "kg")) + ": quedan " + _stockActual(p) + (p.dias_de_cobertura != null ? " (~" + p.dias_de_cobertura + " días)" : ""))
       .join(" · ");
     banner.classList.remove("hidden");
   }
@@ -1213,7 +1217,6 @@ function openAjusteStock() {
     return '<div class="flex items-center gap-2 text-sm">' +
       '<span class="flex-1">' + escapeHtml(label) + (stock != null ? ' <span class="text-gray-400">(hoy ' + stock + ')</span>' : '') + '</span>' +
       '<input type="number" min="0" step="1" class="ajuste-stock w-20 p-1.5 border-2 border-gray-300 rounded text-center" data-id="' + p.id + '" placeholder="sin cambio"/>' +
-      '<input type="number" min="0" step="1" class="ajuste-min w-16 p-1.5 border-2 border-gray-200 rounded text-center" data-id="' + p.id + '" placeholder="mín ' + (p.stock_min != null ? p.stock_min : '—') + '"/>' +
       '</div>';
   }).join("");
   openModal("modalAjusteStock");
@@ -1549,6 +1552,7 @@ function init() {
 // ============================================================
 let TAB_ACTUAL = "resumen";
 function mostrarTab(t) {
+  if (!puedeVer(t)) t = TABS_ORDEN.find(puedeVer) || "sinpermiso";
   TAB_ACTUAL = t;
   document.querySelectorAll(".tab-panel").forEach(p => {
     const en = (p.dataset.panel || "").split(/\s+/).includes(t);
@@ -1563,9 +1567,39 @@ function mostrarTab(t) {
   });
   if (t === "movimientos") { if (PUEDE_MOV) cargarHistorial(true); else mostrarTab("ajustes"); }
 }
+// Qué puede ver el que entró + avisos (todo se decide en config.fitmassa.com). Copia local para trabajar sin señal.
+const MIS_KEY = "caja_admin_permisos_v1";
+let MIS = null;
+try { MIS = JSON.parse(localStorage.getItem(MIS_KEY) || "null"); } catch (e) { MIS = null; }
+const TABS_ORDEN = ["resumen", "cierres", "trigo", "dinero", "ajustes"];
+function puedeVer(t) {
+  if (t === "sinpermiso") return true;
+  if (!MIS || !MIS.ver) return false;
+  if (t === "movimientos") return !!MIS.ver.movimientos;
+  return !!MIS.ver[t];
+}
+function aplicarPermisos() {
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("hidden", !puedeVer(b.dataset.tab)));
+  PUEDE_MOV = puedeVer("movimientos");
+  const a = $("movAcceso"); if (a) a.classList.toggle("hidden", !PUEDE_MOV);
+  if (TAB_ACTUAL === "sinpermiso" || !puedeVer(TAB_ACTUAL)) mostrarTab(TABS_ORDEN.find(puedeVer) || "sinpermiso");
+  else mostrarTab(TAB_ACTUAL);
+  renderAlertaStock();
+}
+async function cargarMisPermisos() {
+  try {
+    const { data, error } = await sbPagos.rpc("caja_mis_permisos");
+    if (!error && data) { MIS = data; try { localStorage.setItem(MIS_KEY, JSON.stringify(data)); } catch (e) { /* */ } }
+    else if (!error && data === null) { MIS = null; try { localStorage.removeItem(MIS_KEY); } catch (e) { /* */ } }
+  } catch (e) { /* sin señal: se usa la copia */ }
+  aplicarPermisos();
+  cargarResumen().catch(() => {});
+}
 function wirePestanas() {
   document.querySelectorAll(".tab-btn").forEach(b => b.addEventListener("click", () => mostrarTab(b.dataset.tab)));
-  mostrarTab("resumen");
+  TAB_ACTUAL = "resumen";
+  aplicarPermisos();
+  cargarMisPermisos();
 }
 
 // ============================================================
@@ -1576,6 +1610,7 @@ function sumarDias(iso, n) {
   return d.toISOString().slice(0, 10);
 }
 async function irADia(fecha) {
+  if (!puedeVer("cierres")) return toast("No tienes acceso a 📅 Cierres (se asigna en config).");
   mostrarTab("cierres");
   if ($("buscarCierre")) $("buscarCierre").value = "";
   state.rango.desde = fecha; state.rango.hasta = fecha;
@@ -1638,7 +1673,9 @@ async function cargarResumen() {
   // 1) Último cierre (hoy si ya cerraron, si no ayer)
   let html = "";
   const ult = cierres[0];
-  if (!porFecha.has(ayer)) alertas.push({ c: "bg-red-50 border-2 border-red-300 text-red-800", t: `⚠️ <span><b>Falta el cierre de ayer</b> (${fmtFecha(ayer)}). Revisa con la cajera.</span>` });
+  const AJ = (MIS && MIS.ajustes) || {};
+  if (!puedeVer("resumen")) { cont.innerHTML = ""; return; }
+  if (AJ.avisar_cierre_faltante !== false && !porFecha.has(ayer)) alertas.push({ c: "bg-red-50 border-2 border-red-300 text-red-800", t: `⚠️ <span><b>Falta el cierre de ayer</b> (${fmtFecha(ayer)}). Revisa con la cajera.</span>` });
   if (ult) {
     const L = ult.fecha;
     const dia = _sumar(porFecha.get(L));
@@ -1676,7 +1713,8 @@ async function cargarResumen() {
     </div>
     <div class="rs-sub mt-1">Promedio por día: <b>${s7.n ? _r0(s7.v / s7.n) : "—"}</b> · ${s7.n} días con cierre</div>
   </div>`;
-  if (s7.v > 0 && pctGasto >= 40) alertas.push({ c: "bg-amber-50 border-2 border-amber-300 text-amber-900", t: `💸 <span>Los gastos de la semana son el <b>${pctGasto.toFixed(0)}%</b> de la venta. Revisa en 💰 Dinero → Gastos por categoría.</span>` });
+  const umbral = Number(AJ.umbral_gastos_pct ?? 40) || 40;
+  if (s7.v > 0 && pctGasto >= umbral) alertas.push({ c: "bg-amber-50 border-2 border-amber-300 text-amber-900", t: `💸 <span>Los gastos de la semana son el <b>${pctGasto.toFixed(0)}%</b> de la venta. Revisa en 💰 Dinero → Gastos por categoría.</span>` });
 
   // 3) Mes en curso vs el mismo tramo del mes anterior
   // Se compara hasta el último día con cierre (si hoy todavía no cerraron, no cuenta como día "en cero")
@@ -1708,7 +1746,8 @@ async function cargarResumen() {
     // (el aviso de stock bajo ya sale arriba, en la franja roja global)
   }
   const ultCompra = (state.sacoCompras || []).map(c => c.fecha).sort().pop();
-  if (ultCompra && ultCompra < sumarDias(hoy, -30)) alertas.push({ c: "bg-sky-50 border-2 border-sky-300 text-sky-900", t: `🛒 <span>La última compra de trigo registrada es del <b>${fmtFecha(ultCompra)}</b>. Si compraste después, regístrala en 🌾 Trigo para que el inventario cuadre.</span>` });
+  const diasSinCompra = Number(AJ.dias_sin_compra ?? 30) || 0;
+  if (diasSinCompra > 0 && ultCompra && ultCompra < sumarDias(hoy, -diasSinCompra)) alertas.push({ c: "bg-sky-50 border-2 border-sky-300 text-sky-900", t: `🛒 <span>La última compra de trigo registrada es del <b>${fmtFecha(ultCompra)}</b>. Si compraste después, regístrala en 🌾 Trigo para que el inventario cuadre.</span>` });
 
   const alHtml = alertas.map(a => `<div class="rs-alerta ${a.c}">${a.t}</div>`).join("");
   cont.innerHTML = alHtml + html + `<p class="rs-sub text-center">Ventas y gastos en R$ con la tasa de cada día. Actualizado ${new Date().toLocaleTimeString("es-VE", { hour: "2-digit", minute: "2-digit" })}.</p>`;
@@ -1751,13 +1790,6 @@ function _histRestaurable(h) {
   if (HIST_HIJOS.includes(h.tabla) || h.tabla === "admin_unlock_code") return false;
   if (h.op === "INSERT" && h.tabla === "dia_cierre") return false;
   return true;
-}
-async function verificarPermisoMovimientos() {
-  try {
-    const { data, error } = await sbPagos.rpc("caja_puede_movimientos");
-    PUEDE_MOV = !error && data === true;
-  } catch (e) { PUEDE_MOV = false; }
-  const a = $("movAcceso"); if (a) a.classList.toggle("hidden", !PUEDE_MOV);
 }
 async function cargarHistorial(reiniciar) {
   const cont = $("histLista"); if (!cont) return;
@@ -1808,7 +1840,6 @@ function wireHistorial() {
   const m = $("histMas"); if (m) m.addEventListener("click", () => { HIST_LIM += 50; cargarHistorial(false); });
   const ab = $("movAbrir"); if (ab) ab.addEventListener("click", () => mostrarTab("movimientos"));
   const vo = $("movVolver"); if (vo) vo.addEventListener("click", () => mostrarTab("ajustes"));
-  verificarPermisoMovimientos();
 }
 
 // ============================================================
@@ -1987,7 +2018,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-10-04.2";
+const APP_BUILD = "2026-10-04.3";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
