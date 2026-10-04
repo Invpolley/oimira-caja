@@ -452,13 +452,33 @@ function renderChart() {
 // ============================================================
 // Render lista de días
 // ============================================================
+// 🔎 Buscador de cierres (04/10/2026): fecha (15/09, 2026-09-15, "sab"), cajera, gastos, formas de pago, notas
+function _sinAcentos(s) { return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase(); }
+function cierreCoincide(c, q) {
+  if (!q) return true;
+  const [y, m, d] = String(c.fecha).split("-");
+  const textos = [
+    c.fecha, d + "/" + m, d + "/" + m + "/" + y, Number(d) + "/" + Number(m), fmtFecha(c.fecha),
+    c.cajera, c.observacoes,
+    ...(c.dia_gasto || []).map(g => (g.descripcion || "") + " " + (g.categoria || "") + " " + g.monto),
+    ...(c.forma_pago_extra || []).map(f => f.nombre),
+  ];
+  const hay = _sinAcentos(textos.join(" | "));
+  return _sinAcentos(q).split(/\s+/).filter(Boolean).every(p => hay.includes(p));
+}
 function renderDias() {
   const list = $("diasList");
   list.innerHTML = "";
-  $("emptyState").classList.toggle("hidden", state.cierres.length > 0);
+  const q = ($("buscarCierre") && $("buscarCierre").value.trim()) || "";
+  const visibles = state.cierres.filter(c => cierreCoincide(c, q));
+  const info = $("buscarInfo");
+  if (info) info.textContent = q
+    ? (visibles.length + " de " + state.cierres.length + " cierres del período coinciden. Si no está, cambia las fechas arriba o usa 📆 Otro día.")
+    : (state.cierres.length + " cierres del " + fmtFecha(state.rango.desde) + " al " + fmtFecha(state.rango.hasta) + ".");
+  $("emptyState").classList.toggle("hidden", visibles.length > 0);
   $("loadingState").classList.add("hidden");
 
-  for (const c of state.cierres) {
+  for (const c of visibles) {
     const k = calcCierre(c);
     const isExp = state.expanded.has(c.id);
 
@@ -732,6 +752,8 @@ async function reload({ preserveExpanded = true } = {}) {
   } catch (e) {
     console.error(e);
   }
+  // El resumen tiene sus propias fechas (ayer, 7 días, mes): se recalcula aparte y nunca frena lo demás
+  cargarResumen().catch(e => console.error("resumen", e));
 }
 
 function updateLastRefreshLabel() {
@@ -841,7 +863,7 @@ function wireSacosRowListeners() {
     await fetchSacoCatalogos(); renderSacosAdmin();
   });
   document.querySelectorAll(".saco-prod-del").forEach(b => b.onclick = async () => {
-    if (!confirm("¿Borrar este saco del catálogo? Los cierres ya guardados conservan su dato.")) return;
+    if (!confirm("¿Archivar este saco del catálogo? Deja de verse en la caja; los cierres ya guardados conservan su dato y queda en 🕓 Historial.")) return;
     const { error } = await sb.from("saco_producto").delete().eq("id", b.dataset.id);
     if (error) {
       // La base de datos ahora protege el historial: un saco con consumo o compras
@@ -860,7 +882,7 @@ function wireSacosRowListeners() {
       return;
     }
     await fetchSacoCatalogos(); renderSacosAdmin();
-    toast("Saco borrado");
+    toast("Saco archivado (queda en 🕓 Historial)");
   });
 }
 
@@ -954,7 +976,8 @@ async function fetchSacoCompras() {
   state.sacoCompras = data || [];
 }
 async function fetchSacoConsumo() {
-  const { data } = await sb.from("saco_consumo_diario").select("*").gte("fecha", daysAgo(190)).order("fecha");
+  // 04/10/2026: TODO el histórico (antes solo 190 días). Son pocas filas (una por tipo de saco por día).
+  const { data } = await sb.from("saco_consumo_diario").select("*").order("fecha");
   state.sacoConsumo = data || [];
 }
 
@@ -1307,11 +1330,11 @@ function wireFormasPagoRows() {
     toast(nuevoActivo ? "Visible en la caja" : "Oculta en la caja");
   });
   document.querySelectorAll(".fp-del").forEach(b => b.onclick = async () => {
-    if (!confirm("¿Borrar esta forma de pago? (los cierres ya guardados conservan su dato)")) return;
-    const { error } = await sb.from("forma_pago_catalogo").delete().eq("id", b.dataset.id);
+    if (!confirm("¿Archivar esta forma de pago? Deja de verse en la caja; los cierres ya guardados conservan su dato y queda en 🕓 Historial.")) return;
+    const { error } = await sb.from("forma_pago_catalogo").delete().eq("id", b.dataset.id); // la base la archiva (activo=false), no la borra
     if (error) { toast(errGuardar(error), 4000); return; }
     await fetchFormasPago(); renderFormasPagoAdmin();
-    toast("Forma de pago borrada");
+    toast("Forma de pago archivada");
   });
 }
 // ============================================================
@@ -1386,11 +1409,11 @@ function wireCajerasRows() {
 
   // Borrar (solo si NO tiene histórico)
   document.querySelectorAll(".cajera-del").forEach(b => b.onclick = async () => {
-    if (!confirm("¿Borrar esta cajera definitivamente? (No tiene cierres históricos a su nombre).")) return;
-    const { error } = await sb.from("cajera").delete().eq("id", b.dataset.id);
+    if (!confirm("¿Archivar esta cajera? Deja de aparecer en la caja y queda guardada en 🕓 Historial.")) return;
+    const { error } = await sb.from("cajera").delete().eq("id", b.dataset.id); // la base la archiva (activo=false), no la borra
     if (error) { toast("Error: " + error.message, 4000); return; }
     await fetchCajeras(); renderCajerasAdmin();
-    toast("Cajera borrada");
+    toast("Cajera archivada");
   });
 }
 
@@ -1514,6 +1537,251 @@ function init() {
   wireSacosInventarioListeners();
   wireFormasPagoListeners();
   wireCajerasListeners();
+  // 04/10/2026: pestañas, buscador de cierres e historial
+  wirePestanas();
+  wireBuscadorCierres();
+  wireHistorial();
+}
+
+// ============================================================
+// 🗂 Pestañas (04/10/2026) — una sección a la vez, barra fija abajo (uso en teléfono)
+// ============================================================
+let TAB_ACTUAL = "resumen";
+function mostrarTab(t) {
+  TAB_ACTUAL = t;
+  document.querySelectorAll(".tab-panel").forEach(p => {
+    const en = (p.dataset.panel || "").split(/\s+/).includes(t);
+    p.classList.toggle("tab-oculto", !en);
+  });
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("activa", b.dataset.tab === t));
+  window.scrollTo(0, 0);
+  // Los gráficos dibujados mientras su pestaña estaba oculta quedan en 0×0: se reajustan al mostrarse
+  requestAnimationFrame(() => {
+    try { const C = window.Chart; if (C && C.instances) Object.values(C.instances).forEach(ch => { try { ch.resize(); } catch (e) { /* */ } }); } catch (e) { /* */ }
+  });
+  if (t === "ajustes") cargarHistorial(true);
+}
+function wirePestanas() {
+  document.querySelectorAll(".tab-btn").forEach(b => b.addEventListener("click", () => mostrarTab(b.dataset.tab)));
+  mostrarTab("resumen");
+}
+
+// ============================================================
+// 📅 Ir directo a un cierre (Hoy / Ayer / Otro día) + buscador
+// ============================================================
+function sumarDias(iso, n) {
+  const d = new Date(iso + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+async function irADia(fecha) {
+  mostrarTab("cierres");
+  if ($("buscarCierre")) $("buscarCierre").value = "";
+  state.rango.desde = fecha; state.rango.hasta = fecha;
+  $("fechaDesde").value = fecha; $("fechaHasta").value = fecha;
+  await reload({ preserveExpanded: false });
+  state.cierres.forEach(c => state.expanded.add(c.id));
+  renderDias();
+  const info = $("buscarInfo");
+  if (info) info.textContent = state.cierres.length
+    ? "Cierre del " + fmtFecha(fecha) + ". Para ver más días toca 7d / 30d arriba."
+    : "No hay cierre guardado para el " + fmtFecha(fecha) + ".";
+}
+function wireBuscadorCierres() {
+  document.querySelectorAll(".ir-dia").forEach(b => b.addEventListener("click", () => irADia(b.dataset.ir === "hoy" ? todayISO() : daysAgo(1))));
+  const f = $("irFecha");
+  if (f) { f.max = todayISO(); f.addEventListener("change", () => { if (f.value) irADia(f.value); }); }
+  const q = $("buscarCierre");
+  if (q) { let t; q.addEventListener("input", () => { clearTimeout(t); t = setTimeout(renderDias, 150); }); }
+}
+
+// ============================================================
+// 🏠 Resumen corto (04/10/2026): lo primero que ve el dueño
+// Ventas = "Gran Total" en R$ con la tasa de cada día; gastos igual. Todo sale de los cierres guardados.
+// ============================================================
+function _sacosDe(c) {
+  const n = (c.dia_saco || []).reduce((s, x) => s + (parseInt(x.cantidad) || 0), 0);
+  return n || Number(c.sacos_trigo || 0);
+}
+function _sumar(lista) {
+  const r = { v: 0, g: 0, t: 0, s: 0, n: 0 };
+  for (const c of lista) { const k = calcCierre(c); r.v += k.granTotalRs; r.g += k.gastosTotalRs; r.t += Number(c.tickets || 0); r.s += _sacosDe(c); r.n++; }
+  r.neto = r.v - r.g;
+  return r;
+}
+function _delta(a, b, txt) {
+  if (!(b > 0)) return `<span class="rs-sub">sin datos para comparar ${txt}</span>`;
+  const p = (a - b) / b * 100;
+  const cls = Math.abs(p) < 1 ? "rs-flat" : p > 0 ? "rs-up" : "rs-down";
+  const fl = Math.abs(p) < 1 ? "＝" : p > 0 ? "▲" : "▼";
+  return `<span class="${cls} font-bold">${fl} ${Math.abs(p).toFixed(0)}%</span> <span class="rs-sub">${txt}</span>`;
+}
+const _r0 = (n) => "R$ " + Math.round(Number(n) || 0).toLocaleString("es-AR");
+async function cargarResumen() {
+  const cont = $("resumenCont");
+  if (!cont) return;
+  const hoy = todayISO(), ayer = daysAgo(1);
+  const iniMes = hoy.slice(0, 8) + "01";
+  const iniMesPrev = sumarDias(iniMes, -1).slice(0, 8) + "01";
+  const desde = [iniMesPrev, sumarDias(hoy, -15)].sort()[0];
+  const [rc, rr] = await Promise.all([
+    sb.from("dia_cierre").select("*,forma_pago_extra(*),dia_gasto(*),dia_saco(*)").gte("fecha", desde).lte("fecha", hoy).order("fecha", { ascending: false }),
+    sb.from("caja_retiro").select("monto,moeda,fecha").gte("fecha", iniMes).lte("fecha", hoy),
+  ]);
+  if (rc.error) { cont.innerHTML = `<div class="rs-card text-sm text-red-700">No se pudo cargar el resumen: ${escapeHtml(rc.error.message)}</div>`; return; }
+  const cierres = rc.data || [];
+  const porFecha = new Map(); cierres.forEach(c => { if (!porFecha.has(c.fecha)) porFecha.set(c.fecha, []); porFecha.get(c.fecha).push(c); });
+  const entre = (a, b) => cierres.filter(c => c.fecha >= a && c.fecha <= b);
+  const alertas = [];
+
+  // 1) Último cierre (hoy si ya cerraron, si no ayer)
+  let html = "";
+  const ult = cierres[0];
+  if (!porFecha.has(ayer)) alertas.push({ c: "bg-red-50 border-2 border-red-300 text-red-800", t: `⚠️ <span><b>Falta el cierre de ayer</b> (${fmtFecha(ayer)}). Revisa con la cajera.</span>` });
+  if (ult) {
+    const L = ult.fecha;
+    const dia = _sumar(porFecha.get(L));
+    const ant = _sumar(porFecha.get(sumarDias(L, -7)) || []);
+    const nombre = L === hoy ? "Hoy" : L === ayer ? "Ayer" : "Último cierre";
+    const tprom = dia.t > 0 ? dia.v / dia.t : 0;
+    html += `<div class="rs-card">
+      <div class="flex justify-between items-baseline"><div class="text-sm font-bold text-amber-800">📅 ${nombre} · ${fmtFecha(L)}</div><div class="rs-sub">👤 ${escapeHtml(ult.cajera || "—")}</div></div>
+      <div class="rs-big mono text-green-700 mt-1">${_r0(dia.v)}</div>
+      <div class="text-xs mt-0.5">${_delta(dia.v, ant.v, "vs el " + fmtFecha(sumarDias(L, -7)))}</div>
+      <div class="rs-grid mt-2">
+        <div class="rs-mini"><span class="rs-sub">Gastos</span><b class="mono text-red-700">${_r0(dia.g)}</b></div>
+        <div class="rs-mini"><span class="rs-sub">Queda</span><b class="mono ${dia.neto < 0 ? "text-red-700" : "text-green-700"}">${_r0(dia.neto)}</b></div>
+        <div class="rs-mini"><span class="rs-sub">🌾 Sacos</span><b>${dia.s}</b></div>
+      </div>
+      <div class="rs-sub mt-1">${dia.t ? `🎫 ${dia.t} tickets · promedio ${fmtR(tprom)}` : ""}</div>
+      <button type="button" class="rs-ver mt-2 w-full py-2.5 bg-amber-600 text-white rounded-xl font-bold text-sm" data-fecha="${L}">Ver el cierre completo ›</button>
+    </div>`;
+  } else {
+    html += `<div class="rs-card text-sm text-gray-600">Todavía no hay cierres en los últimos días.</div>`;
+  }
+
+  // 2) Últimos 7 días vs los 7 anteriores (salud del negocio)
+  const L7 = ult ? ult.fecha : hoy;
+  const s7 = _sumar(entre(sumarDias(L7, -6), L7));
+  const p7 = _sumar(entre(sumarDias(L7, -13), sumarDias(L7, -7)));
+  const pctGasto = s7.v > 0 ? (s7.g / s7.v * 100) : 0;
+  html += `<div class="rs-card">
+    <div class="text-sm font-bold text-amber-800">📈 Últimos 7 días <span class="rs-sub">(${fmtFecha(sumarDias(L7, -6))} – ${fmtFecha(L7)})</span></div>
+    <div class="flex items-end justify-between mt-1"><div class="rs-big mono text-green-700">${_r0(s7.v)}</div><div class="text-xs text-right">${_delta(s7.v, p7.v, "vs semana anterior")}</div></div>
+    <div class="rs-grid mt-2">
+      <div class="rs-mini"><span class="rs-sub">Gastos</span><b class="mono text-red-700">${_r0(s7.g)}</b><span class="rs-sub">${pctGasto.toFixed(0)}% de la venta</span></div>
+      <div class="rs-mini"><span class="rs-sub">Queda</span><b class="mono ${s7.neto < 0 ? "text-red-700" : "text-green-700"}">${_r0(s7.neto)}</b><span class="rs-sub">${_delta(s7.neto, p7.neto, "")}</span></div>
+      <div class="rs-mini"><span class="rs-sub">Venta por saco</span><b class="mono">${s7.s ? _r0(s7.v / s7.s) : "—"}</b><span class="rs-sub">${s7.s} sacos</span></div>
+    </div>
+    <div class="rs-sub mt-1">Promedio por día: <b>${s7.n ? _r0(s7.v / s7.n) : "—"}</b> · ${s7.n} días con cierre</div>
+  </div>`;
+  if (s7.v > 0 && pctGasto >= 40) alertas.push({ c: "bg-amber-50 border-2 border-amber-300 text-amber-900", t: `💸 <span>Los gastos de la semana son el <b>${pctGasto.toFixed(0)}%</b> de la venta. Revisa en 💰 Dinero → Gastos por categoría.</span>` });
+
+  // 3) Mes en curso vs el mismo tramo del mes anterior
+  // Se compara hasta el último día con cierre (si hoy todavía no cerraron, no cuenta como día "en cero")
+  const finMes = ult && ult.fecha >= iniMes ? ult.fecha : hoy;
+  const nDia = Number(finMes.slice(8, 10));
+  const finPrev = sumarDias(iniMesPrev, nDia - 1) < iniMes ? sumarDias(iniMesPrev, nDia - 1) : sumarDias(iniMes, -1);
+  const sm = _sumar(entre(iniMes, finMes));
+  const pm = _sumar(entre(iniMesPrev, finPrev));
+  const ret = {}; (rr.data || []).forEach(x => { ret[x.moeda] = (ret[x.moeda] || 0) + Number(x.monto || 0); });
+  const retTxt = Object.keys(ret).length ? Object.keys(ret).map(m => fmtMoeda(ret[m], m)).join(" · ") : "ninguno";
+  html += `<div class="rs-card">
+    <div class="text-sm font-bold text-amber-800">🗓 Este mes <span class="rs-sub">(1 al ${nDia})</span></div>
+    <div class="flex items-end justify-between mt-1"><div class="rs-big mono text-green-700">${_r0(sm.v)}</div><div class="text-xs text-right">${_delta(sm.v, pm.v, "vs mismos días del mes pasado")}</div></div>
+    <div class="rs-sub mt-1">Gastos ${_r0(sm.g)} · Queda <b class="${sm.neto < 0 ? "text-red-700" : "text-green-700"}">${_r0(sm.neto)}</b> · 🌾 ${sm.s} sacos</div>
+    <div class="rs-sub">💸 Retiros del mes: <b>${retTxt}</b></div>
+  </div>`;
+
+  // 4) Trigo
+  const prods = (state.sacoProductos || []).filter(p => p.activo);
+  if (prods.length) {
+    const filas = prods.map(p => {
+      const st = _stockActual(p), dias = p.dias_de_cobertura, bajo = p.bajo_minimo || (Number(p.stock_min) > 0 && st <= Number(p.stock_min));
+      return `<div class="flex justify-between items-center py-1 border-b border-amber-100 last:border-0">
+        <span class="text-sm">${escapeHtml(p.label || (p.nombre + " " + p.kg + "kg"))}</span>
+        <span class="text-right"><b class="mono ${bajo ? "text-red-700" : "text-gray-800"}">${st}</b> <span class="rs-sub">sacos${dias != null && Number(dias) >= 0 ? " · ~" + dias + " días" : ""}</span></span></div>`;
+    }).join("");
+    html += `<div class="rs-card"><div class="flex justify-between items-center"><div class="text-sm font-bold text-amber-800">🌾 Trigo</div>
+      <button type="button" class="rs-tab text-xs font-semibold text-amber-700" data-tab="trigo">Ver más ›</button></div>${filas}</div>`;
+    // (el aviso de stock bajo ya sale arriba, en la franja roja global)
+  }
+  const ultCompra = (state.sacoCompras || []).map(c => c.fecha).sort().pop();
+  if (ultCompra && ultCompra < sumarDias(hoy, -30)) alertas.push({ c: "bg-sky-50 border-2 border-sky-300 text-sky-900", t: `🛒 <span>La última compra de trigo registrada es del <b>${fmtFecha(ultCompra)}</b>. Si compraste después, regístrala en 🌾 Trigo para que el inventario cuadre.</span>` });
+
+  const alHtml = alertas.map(a => `<div class="rs-alerta ${a.c}">${a.t}</div>`).join("");
+  cont.innerHTML = alHtml + html + `<p class="rs-sub text-center">Ventas y gastos en R$ con la tasa de cada día. Actualizado ${new Date().toLocaleTimeString("es-VE", { hour: "2-digit", minute: "2-digit" })}.</p>`;
+  cont.querySelectorAll(".rs-ver").forEach(b => b.addEventListener("click", () => irADia(b.dataset.fecha)));
+  cont.querySelectorAll(".rs-tab").forEach(b => b.addEventListener("click", () => mostrarTab(b.dataset.tab)));
+}
+
+// ============================================================
+// 🕓 Historial de cambios (bitácora oimira_caja.historial, solo lectura) + Restaurar lo borrado
+// ============================================================
+const HIST_NOMBRE = { dia_cierre: "Cierre", dia_gasto: "Gasto", dia_saco: "Sacos del cierre", forma_pago_extra: "Forma de pago del cierre",
+  caja_retiro: "Retiro", caja_saldo: "Saldo de caja", saco_compra: "Compra de trigo", saco_producto: "Saco (catálogo)", cajera: "Cajera",
+  canal_caja: "Canal", categoria_gasto: "Categoría", forma_pago_catalogo: "Forma de pago", saco_peso: "Peso de saco", saco_tipo: "Tipo de saco", admin_unlock_code: "Código de edición" };
+const HIST_CAMPO = { pix_rs: "PIX", dinheiro_rs: "Efectivo", ventas_efectivo_rs: "Venta efectivo", debito_rs: "Débito", pago_movil_bs: "Pago Móvil",
+  bs_efectivo_bs: "Bs efectivo", usd_usd: "USD", tickets: "Tickets", sacos_trigo: "Sacos", observacoes: "Notas", cajera: "Cajera", monto: "Monto",
+  moeda: "Moneda", motivo: "Motivo", destino: "Destino", nota: "Nota", canal: "Canal", fecha: "Fecha", stock_base: "Existencia", stock_min: "Mínimo",
+  activo: "Visible", tasa_bs_rs: "Tasa Bs", tasa_usd_rs: "Tasa USD", efectivo_deteriorado_rs: "Deteriorado", nombre: "Nombre", label: "Nombre visible",
+  cantidad: "Cantidad", precio_unit: "Precio", costo: "Costo" };
+const HIST_RESTAURABLE = ["caja_retiro", "saco_compra", "caja_saldo"];
+const HIST_HIJOS = ["dia_gasto", "dia_saco", "forma_pago_extra"];
+let HIST_LIM = 40;
+function _histResumen(h) {
+  const r = h.despues || h.antes || {};
+  if (h.op === "UPDATE" && h.antes && h.despues) {
+    const ign = ["updated_at", "transmitted_at", "submitted_at", "device"];
+    const cambios = Object.keys(h.despues).filter(k => !ign.includes(k) && JSON.stringify(h.antes[k]) !== JSON.stringify(h.despues[k]));
+    if (!cambios.length) return "sin cambios visibles";
+    return cambios.slice(0, 4).map(k => `${HIST_CAMPO[k] || k}: ${h.antes[k] ?? "—"} → ${h.despues[k] ?? "—"}`).join(" · ") + (cambios.length > 4 ? " …" : "");
+  }
+  const partes = [];
+  if (r.fecha) partes.push(fmtFecha(r.fecha));
+  if (r.monto != null) partes.push(fmtMoeda(r.monto, r.moeda));
+  if (r.cantidad != null) partes.push(r.cantidad + " u");
+  ["motivo", "descripcion", "nombre", "label", "cajera", "tipo"].forEach(k => { if (r[k]) partes.push(String(r[k])); });
+  return partes.join(" · ");
+}
+async function cargarHistorial(reiniciar) {
+  const cont = $("histLista"); if (!cont) return;
+  if (reiniciar) HIST_LIM = 40;
+  const f = ($("histFiltro") && $("histFiltro").value) || "";
+  let q = sb.from("historial").select("*").order("id", { ascending: false }).limit(HIST_LIM);
+  if (f === "borrados") q = q.eq("op", "DELETE").in("tabla", HIST_RESTAURABLE);
+  else if (f) q = q.in("tabla", f.split(","));
+  else q = q.not("tabla", "in", "(" + HIST_HIJOS.join(",") + ")");
+  cont.innerHTML = '<div class="text-xs text-gray-400">Cargando…</div>';
+  const { data, error } = await q;
+  if (error) { cont.innerHTML = `<div class="text-xs text-red-700">No se pudo leer el historial: ${escapeHtml(error.message)}</div>`; return; }
+  const lista = data || [];
+  if (!lista.length) { cont.innerHTML = '<div class="text-xs text-gray-500 italic">Todavía no hay cambios registrados con este filtro. (El historial empezó el 04/10/2026.)</div>'; $("histMas").classList.add("hidden"); return; }
+  const ICO = { INSERT: "🆕", UPDATE: "✏️", DELETE: "🗑", ARCHIVAR: "🗂" };
+  cont.innerHTML = lista.map(h => {
+    const cuando = new Date(h.ts).toLocaleString("es-VE", { timeZone: APP_TZ, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    const puede = h.op === "DELETE" && HIST_RESTAURABLE.includes(h.tabla);
+    return `<div class="p-2 rounded-lg border ${h.op === "DELETE" ? "border-red-200 bg-red-50" : "border-gray-200 bg-gray-50"}">
+      <div class="flex justify-between gap-2"><b class="text-xs">${ICO[h.op] || "•"} ${HIST_NOMBRE[h.tabla] || h.tabla} · ${h.op === "INSERT" ? "nuevo" : h.op === "UPDATE" ? "editado" : "borrado"}</b>
+        <span class="text-[10px] text-gray-500 whitespace-nowrap">${cuando}</span></div>
+      <div class="text-xs text-gray-700 break-words">${escapeHtml(_histResumen(h))}</div>
+      <div class="flex justify-between items-center"><span class="text-[10px] text-gray-500">👤 ${escapeHtml(h.usuario || "sistema")}</span>
+        ${puede ? `<button type="button" class="hist-rest text-xs font-semibold px-2 py-1 rounded bg-emerald-600 text-white" data-id="${h.id}">↩ Restaurar</button>` : ""}</div>
+    </div>`;
+  }).join("");
+  $("histMas").classList.toggle("hidden", lista.length < HIST_LIM);
+  cont.querySelectorAll(".hist-rest").forEach(b => b.addEventListener("click", async () => {
+    if (!confirm("¿Restaurar este registro tal como estaba antes de borrarlo?")) return;
+    b.disabled = true; b.textContent = "Restaurando…";
+    const { error: e2 } = await sbPagos.rpc("caja_historial_restaurar", { p_historial_id: Number(b.dataset.id) });
+    if (e2) { toast("No se pudo restaurar: " + e2.message, 4500); b.disabled = false; b.textContent = "↩ Restaurar"; return; }
+    toast("✅ Restaurado");
+    await reload();
+    cargarHistorial(true);
+  }));
+}
+function wireHistorial() {
+  const f = $("histFiltro"); if (f) f.addEventListener("change", () => cargarHistorial(true));
+  const m = $("histMas"); if (m) m.addEventListener("click", () => { HIST_LIM += 40; cargarHistorial(false); });
 }
 
 // ============================================================
@@ -1692,7 +1960,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-10-01.2";
+const APP_BUILD = "2026-10-04.1";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
@@ -1985,10 +2253,10 @@ function renderCajaRetiros() {
   // Wire delete
   cont.querySelectorAll(".retiro-del").forEach(btn => {
     btn.addEventListener("click", async () => {
-      if (!confirm("¿Eliminar este retiro?")) return;
+      if (!confirm("¿Eliminar este retiro?\n\nSi fue un error, se puede recuperar en ⚙️ Ajustes → 🕓 Historial.")) return;
       const { error } = await sb.from("caja_retiro").delete().eq("id", btn.dataset.id);
       if (error) { toast("Error: " + error.message); return; }
-      toast("Retiro eliminado");
+      toast("Retiro eliminado (recuperable en 🕓 Historial)");
       reload();
     });
   });

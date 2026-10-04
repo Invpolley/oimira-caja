@@ -93,6 +93,25 @@
   .srv-banner b{color:#fbbf24}
   .net-banner{position:sticky;top:0;z-index:19;background:#1e293b;color:#e2e8f0;padding:8px 14px;font-size:12.5px;text-align:center;line-height:1.4}
   .net-banner.oculto{display:none}
+
+  /* Pestañas (04/10/2026): una sección a la vez + barra fija abajo, pensada para el teléfono */
+  .tab-panel.tab-oculto { display: none !important; }
+  .tab-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; background: #fff;
+    border-top: 2px solid #fcd34d; box-shadow: 0 -4px 12px rgba(0,0,0,.08); padding-bottom: env(safe-area-inset-bottom); }
+  .tab-btn { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 7px 2px 8px;
+    font-size: 11px; font-weight: 600; color: #78716c; background: none; border: 0; }
+  .tab-btn span { font-size: 21px; line-height: 1.1; filter: grayscale(.6); opacity: .8; }
+  .tab-btn.activa { color: #b45309; background: #fffbeb; }
+  .tab-btn.activa span { filter: none; opacity: 1; }
+  /* Tarjetas del resumen */
+  .rs-card { background: #fff; border-radius: 14px; padding: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,.07); }
+  .rs-big { font-size: 26px; font-weight: 800; line-height: 1.1; }
+  .rs-sub { font-size: 11px; color: #6b7280; }
+  .rs-up { color: #15803d; } .rs-down { color: #b91c1c; } .rs-flat { color: #6b7280; }
+  .rs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .rs-mini { background: #fffbeb; border-radius: 10px; padding: 7px 6px; text-align: center; }
+  .rs-mini b { display: block; font-size: 15px; }
+  .rs-alerta { display: flex; gap: 8px; align-items: flex-start; border-radius: 12px; padding: 10px 12px; font-size: 13px; }
 </style>
 </head>
 <body class="pb-24">
@@ -198,13 +217,13 @@
 <div id="app" class="hidden">
 
 <!-- Header -->
-<header class="bg-gradient-to-r from-amber-700 to-orange-600 text-white p-4 shadow-lg sticky top-0 z-20">
+<header class="bg-gradient-to-r from-amber-700 to-orange-600 text-white px-3 py-2 sm:p-4 shadow-lg sticky top-0 z-20">
   <div class="max-w-5xl mx-auto flex items-center justify-between">
     <div class="flex items-center gap-2">
-      <span class="text-3xl">📊</span>
+      <span class="text-2xl sm:text-3xl">📊</span>
       <div>
         <h1 class="text-lg font-bold leading-tight">OiMira Admin</h1>
-        <p class="text-amber-100 text-xs">Panel de cierres diarios</p>
+        <p class="text-amber-100 text-xs hidden sm:block">Panel de cierres diarios</p>
       </div>
     </div>
     <div class="text-right text-xs">
@@ -238,14 +257,23 @@
 
 <main class="max-w-5xl mx-auto p-3 space-y-3">
 
+  <!-- ===================== -->
+  <!-- 🏠 RESUMEN (04/10/2026) — lo primero que ve el dueño -->
+  <!-- ===================== -->
+  <div class="tab-panel space-y-3" data-panel="resumen">
+    <div id="resumenCont" class="space-y-3">
+      <div class="text-center text-gray-500 py-8"><div class="text-4xl mb-2 animate-pulse">⏳</div><p class="text-sm">Preparando el resumen…</p></div>
+    </div>
+  </div>
+
   <!-- 💱 Tasa de cambio central (27/09/2026) -->
-  <div class="bg-white rounded-xl p-3 card border-l-4 border-yellow-400">
+  <div class="tab-panel bg-white rounded-xl p-3 card border-l-4 border-yellow-400" data-panel="ajustes">
     <h2 class="text-sm font-bold text-yellow-800">💱 Tasa de cambio (paralela)</h2>
     <div id="tasaCentral"></div>
   </div>
 
-  <!-- Filtro de rango -->
-  <div class="bg-white rounded-xl p-3 card">
+  <!-- Filtro de rango (sirve para Cierres, Trigo y Dinero) -->
+  <div class="tab-panel bg-white rounded-xl p-3 card" data-panel="cierres trigo dinero">
     <div class="flex flex-wrap items-end gap-2">
       <div class="flex-1 min-w-[140px]">
         <label class="text-xs text-gray-600 block">Desde</label>
@@ -267,6 +295,8 @@
     </div>
   </div>
 
+  <!-- ===================== 💰 DINERO ===================== -->
+  <div class="tab-panel space-y-3" data-panel="dinero">
   <!-- KPIs -->
   <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
     <div class="kpi border-green-400">
@@ -499,6 +529,28 @@
     </div>
   </div>
 
+  <!-- Resumen gastos por categoría -->
+  <div class="bg-white rounded-xl p-3 card">
+    <h2 class="text-base font-bold text-amber-800 mb-2">💸 Gastos por categoría</h2>
+    <div id="porCategoria" class="space-y-2"></div>
+  </div>
+  </div><!-- /dinero -->
+
+  <!-- ===================== 📅 CIERRES ===================== -->
+  <div class="tab-panel space-y-3" data-panel="cierres">
+  <!-- Buscar un cierre (04/10/2026) -->
+  <div class="bg-white rounded-xl p-3 card">
+    <div class="flex gap-1 mb-2">
+      <button type="button" data-ir="hoy" class="ir-dia flex-1 px-2 py-2 bg-amber-100 border-2 border-amber-300 rounded-lg text-sm font-semibold">Hoy</button>
+      <button type="button" data-ir="ayer" class="ir-dia flex-1 px-2 py-2 bg-amber-100 border-2 border-amber-300 rounded-lg text-sm font-semibold">Ayer</button>
+      <label class="flex-1 relative px-2 py-2 bg-white border-2 border-amber-300 rounded-lg text-sm font-semibold text-center cursor-pointer">📆 Otro día
+        <input type="date" id="irFecha" class="absolute inset-0 opacity-0 cursor-pointer"/>
+      </label>
+    </div>
+    <input type="search" id="buscarCierre" placeholder="🔎 Buscar: fecha (15/09), cajera, gasto, nota…" class="w-full p-2 border-2 border-gray-300 rounded-lg"/>
+    <p id="buscarInfo" class="text-[11px] text-gray-500 mt-1"></p>
+  </div>
+
   <!-- Lista de días con detalle expandible -->
   <div class="bg-white rounded-xl p-3 card">
     <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
@@ -541,15 +593,10 @@
     <h2 class="text-base font-bold text-amber-800 mb-2">👥 Por cajera</h2>
     <div id="porCajera" class="space-y-2"></div>
   </div>
-
-  <!-- Resumen gastos por categoría -->
-  <div class="bg-white rounded-xl p-3 card">
-    <h2 class="text-base font-bold text-amber-800 mb-2">💸 Gastos por categoría</h2>
-    <div id="porCategoria" class="space-y-2"></div>
-  </div>
+  </div><!-- /cierres -->
 
   <!-- 🌾 Trigo: existencia + consumo + gráficos + pronóstico + costo (uso diario) -->
-  <div class="bg-white rounded-xl p-3 card">
+  <div class="tab-panel bg-white rounded-xl p-3 card" data-panel="trigo">
     <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
       <h2 class="text-base font-bold text-amber-800">🌾 Trigo</h2>
       <div class="flex gap-1">
@@ -587,9 +634,28 @@
     </div>
   </div>
 
+  <!-- 🕓 Historial de cambios (04/10/2026): nada se pierde, todo se puede consultar y lo borrado se recupera -->
+  <div class="tab-panel bg-white rounded-xl p-3 card" data-panel="ajustes">
+    <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+      <h2 class="text-base font-bold text-amber-800">🕓 Historial de cambios</h2>
+      <select id="histFiltro" class="p-1.5 border-2 border-gray-300 rounded text-sm">
+        <option value="">Todo</option>
+        <option value="borrados">Solo lo borrado</option>
+        <option value="dia_cierre">Cierres</option>
+        <option value="caja_retiro">Retiros</option>
+        <option value="caja_saldo">Saldos</option>
+        <option value="dia_gasto">Gastos</option>
+        <option value="saco_producto,saco_compra">Trigo</option>
+      </select>
+    </div>
+    <p class="text-[11px] text-gray-500 mb-2">Cada cambio queda guardado con quién lo hizo y cuándo. Lo borrado se puede <b>restaurar</b>.</p>
+    <div id="histLista" class="space-y-1 text-sm"><div class="text-xs text-gray-400">Abre esta pestaña para cargar el historial.</div></div>
+    <button type="button" id="histMas" class="hidden mt-2 w-full py-2 border-2 border-gray-300 rounded-lg text-sm font-semibold">Ver más</button>
+  </div>
+
   <!-- ⚙️ Configuración (avanzado) — separada del uso diario -->
-  <div class="bg-white rounded-xl p-3 card">
-    <details>
+  <div class="tab-panel bg-white rounded-xl p-3 card" data-panel="ajustes">
+    <details open>
       <summary class="cursor-pointer text-base font-bold text-gray-600 select-none">⚙️ Configuración (avanzado)</summary>
       <p class="text-[11px] text-gray-400 mt-1 mb-3">Esto NO es para el día a día. Acá configurás los tipos de saco y los nombres de los canales de saldo.</p>
 
@@ -601,7 +667,7 @@
         <input id="nuevoSacoColor" type="color" value="#2563eb" class="w-9 h-9 border-2 border-gray-300 rounded p-0" title="Color"/>
         <button id="addSacoProdBtn" type="button" class="px-3 bg-amber-600 text-white rounded text-sm font-bold">+</button>
       </div>
-      <p class="text-[11px] text-gray-400 mt-2">Cada saco es <b>tipo + peso</b> (ej. "Azul 50kg"). Desactivar lo oculta de la caja sin borrar historial; borrar lo elimina del catálogo.</p>
+      <p class="text-[11px] text-gray-400 mt-2">Cada saco es <b>tipo + peso</b> (ej. "Azul 50kg"). Desactivar lo oculta de la caja sin borrar historial; "borrar" lo archiva (nunca se pierde: queda en 🕓 Historial).</p>
 
       <div class="text-xs font-bold text-gray-600 mb-1 mt-4 border-t border-gray-100 pt-3">💰 Canales de saldo</div>
       <p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-2">⚠️ Cambiá solo el <b>nombre visible</b>. Si <b>ocultás</b> un canal, cambia lo que se ve en los totales (la data no se borra).</p>
@@ -688,6 +754,15 @@
   </div>
 
 </main>
+
+<!-- Barra de pestañas fija abajo (04/10/2026) -->
+<nav id="tabBar" class="tab-bar">
+  <button type="button" class="tab-btn" data-tab="resumen"><span>🏠</span>Resumen</button>
+  <button type="button" class="tab-btn" data-tab="cierres"><span>📅</span>Cierres</button>
+  <button type="button" class="tab-btn" data-tab="trigo"><span>🌾</span>Trigo</button>
+  <button type="button" class="tab-btn" data-tab="dinero"><span>💰</span>Dinero</button>
+  <button type="button" class="tab-btn" data-tab="ajustes"><span>⚙️</span>Ajustes</button>
+</nav>
 </div>
 
 <!-- ================================== -->
@@ -1027,10 +1102,10 @@
 </div>
 
 <!-- Toast -->
-<div id="toast" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-2xl z-50 text-sm font-medium"></div>
+<div id="toast" class="hidden fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-2xl z-50 text-sm font-medium"></div>
 
 <script type="module" src="app.js"></script>
-<div style='position:fixed;bottom:6px;right:9px;font-size:10px;color:#9aa0a6;opacity:.65;pointer-events:none;z-index:99999'>v2026-10-01.2</div>
+<div style='position:fixed;bottom:64px;right:9px;font-size:10px;color:#9aa0a6;opacity:.65;pointer-events:none;z-index:99999'>v2026-10-04.1</div>
 <script>
 /* PWA-RESILIENTE: ping al hosting (el SW deja pasar ?ping=) + estado de red */
 (function(){
