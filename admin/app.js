@@ -1767,6 +1767,14 @@ let _anChart = null, _anCargado = 0;
 function _media(a) { return a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0; }
 function _pct(a, b) { return b > 0 ? (a / b - 1) * 100 : null; }
 function _pctTxt(p) { if (p == null) return "—"; const r = Math.round(p); return `<b class="${r > 2 ? "rs-up" : r < -2 ? "rs-down" : "rs-flat"}">${r > 0 ? "+" : ""}${r}%</b>`; }
+// Feriados de Brasil: color verde y banderita (pedido de Polley). VE+BR = cae el mismo día en los dos países.
+// Banderas dibujadas (los emoji de bandera no se ven en Windows: salen "BR"/"VE")
+const FLAG_BR = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 14" width="20" height="14" style="display:inline-block;vertical-align:-2px;border-radius:2px"><rect width="20" height="14" fill="#009c3b"/><path d="M10 1.6 18.2 7 10 12.4 1.8 7z" fill="#ffdf00"/><circle cx="10" cy="7" r="3" fill="#002776"/></svg>';
+const FLAG_VE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 14" width="20" height="14" style="display:inline-block;vertical-align:-2px;border-radius:2px"><rect width="20" height="14" fill="#cf142b"/><rect width="20" height="9.33" fill="#00247d"/><rect width="20" height="4.67" fill="#ffcc00"/></svg>';
+function _bandera(c) { return c.pais === "BR" ? FLAG_BR : c.pais === "VE+BR" ? FLAG_VE + " " + FLAG_BR : FLAG_VE; }
+function _grupo(c) { return c.pais === "BR" ? "brasil" : c.tipo; }
+function _estiloBR(c) { return c.pais === "BR" ? ' style="background:#ecfdf5;box-shadow:inset 3px 0 0 #16a34a"' : c.pais === "VE+BR" ? ' style="background:#fefce8;box-shadow:inset 3px 0 0 #16a34a"' : ""; }
+function _nomCal(c) { return escapeHtml(String(c.nombre || "").replace(/^🇧🇷\s*/, "")) + (c.nombre_br && c.pais !== "BR" ? `<div class="rs-sub" style="color:#15803d">${FLAG_BR} ${escapeHtml(c.nombre_br)}</div>` : c.pais === "BR" && c.nombre_br ? `<div class="rs-sub" style="color:#15803d">${escapeHtml(c.nombre_br)}</div>` : ""); }
 function _dowIso(iso) { const d = new Date(iso + "T12:00:00Z").getUTCDay(); return d === 0 ? 7 : d; }
 async function cargarAnalisis(forzar) {
   const cont = $("anCont"); if (!cont) return;
@@ -1808,12 +1816,12 @@ async function cargarAnalisis(forzar) {
     const pv = porDow[d.dow]; const vis = dias.find(x => x.f === sumarDias(c.f, -1));
     return { c, d, pv: _pct(d.v, pv.v), ps: _pct(d.s, pv.s), pvis: vis ? _pct(vis.v, porDow[vis.dow].v) : null };
   }).filter(Boolean);
-  const factorTipo = {}; ["feriado", "importante", "evento"].forEach(t => { const x = pasadas.filter(p => p.c.tipo === t && p.pv != null); factorTipo[t] = x.length ? _media(x.map(p => p.pv)) : null; });
+  const factorTipo = {}; ["feriado", "importante", "evento", "brasil"].forEach(t => { const x = pasadas.filter(p => _grupo(p.c) === t && p.pv != null); factorTipo[t] = x.length ? _media(x.map(p => p.pv)) : null; });
   html += `<div class="rs-card"><div class="text-sm font-bold text-amber-800">🎉 Feriados y fechas especiales: ¿cómo nos fue?</div>
     <div class="rs-sub mb-1">Venta del día comparada con un ${"día normal"} de la misma semana; "Víspera" = el día antes.</div>
     ${pasadas.length ? `<table class="an-tbl"><tr><th>Fecha</th><th class="n">Venta</th><th class="n">vs normal</th><th class="n">Víspera</th></tr>
-      ${pasadas.slice().reverse().map(p => `<tr><td><b>${escapeHtml(p.c.nombre)}</b><div class="rs-sub">${fmtFecha(p.c.f)} · ${p.c.tipo === "feriado" ? "feriado" : p.c.tipo === "importante" ? "fecha especial" : escapeHtml(p.c.tipo || "")} · 🌾 ${p.d.s}</div></td><td class="n mono">${_r0(p.d.v)}</td><td class="n">${_pctTxt(p.pv)}</td><td class="n">${_pctTxt(p.pvis)}</td></tr>`).join("")}</table>
-      <div class="rs-sub mt-2">En promedio: feriados ${_pctTxt(factorTipo.feriado)} · fechas especiales ${_pctTxt(factorTipo.importante)} frente a un día normal.</div>`
+      ${pasadas.slice().reverse().map(p => `<tr${_estiloBR(p.c)}><td>${_bandera(p.c)} <b>${_nomCal(p.c)}</b><div class="rs-sub">${fmtFecha(p.c.f)} · ${p.c.pais === "BR" ? "feriado de Brasil" : p.c.tipo === "feriado" ? "feriado" : p.c.tipo === "importante" ? "fecha especial" : escapeHtml(p.c.tipo || "")} · 🌾 ${p.d.s}</div></td><td class="n mono">${_r0(p.d.v)}</td><td class="n">${_pctTxt(p.pv)}</td><td class="n">${_pctTxt(p.pvis)}</td></tr>`).join("")}</table>
+      <div class="rs-sub mt-2">En promedio frente a un día normal: ${FLAG_VE} feriados ${_pctTxt(factorTipo.feriado)} · ⭐ fechas especiales ${_pctTxt(factorTipo.importante)} · <span style="color:#15803d">${FLAG_BR} feriados de Brasil</span> ${_pctTxt(factorTipo.brasil)}${factorTipo.evento != null ? " · 🎪 eventos " + _pctTxt(factorTipo.evento) : ""}.</div>`
       : `<div class="rs-sub">Todavía no hay fechas especiales con cierre guardado.</div>`}</div>`;
   // 4) Próximas fechas: pronóstico
   const prox = cal.filter(c => c.f > hoy && c.f <= sumarDias(hoy, 90));
@@ -1823,9 +1831,9 @@ async function cargarAnalisis(forzar) {
       ${prox.map(c => {
         const dw = _dowIso(c.f), base = porDow[dw].v;
         const mismo = pasadas.find(p => p.c.nombre === c.nombre && p.c.f.slice(5) === c.f.slice(5));
-        const f = mismo ? mismo.pv : (factorTipo[c.tipo] ?? 0);
+        const f = mismo ? mismo.pv : (factorTipo[_grupo(c)] ?? factorTipo[c.tipo] ?? 0);
         const est = base * (1 + (f || 0) / 100), sac = ventaPorSaco ? Math.round(est / ventaPorSaco) : null;
-        return `<tr><td><b>${escapeHtml(c.nombre)}</b><div class="rs-sub">${fmtFecha(c.f)} · ${f == null ? "sin historia" : (mismo ? "como el año pasado " : "como otras fechas ") + (f > 0 ? "+" : "") + Math.round(f) + "%"}</div></td><td class="n mono">${_r0(est)}</td><td class="n">${sac ?? "—"}</td></tr>`;
+        return `<tr${_estiloBR(c)}><td>${_bandera(c)} <b>${_nomCal(c)}</b><div class="rs-sub">${fmtFecha(c.f)} · ${f == null ? "sin historia" : (mismo ? "como el año pasado " : "como otras fechas ") + (f > 0 ? "+" : "") + Math.round(f) + "%"}</div></td><td class="n mono">${_r0(est)}</td><td class="n">${sac ?? "—"}</td></tr>`;
       }).join("")}</table>` : `<div class="rs-sub">No hay fechas especiales en los próximos 90 días. Se cargan en Configuración → 📅 Calendario.</div>`}</div>`;
   // 5) Por mes
   const meses = {}; dias.forEach(d => { const k = d.f.slice(0, 7); (meses[k] = meses[k] || []).push(d); });
@@ -2104,7 +2112,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-10-04.6";
+const APP_BUILD = "2026-10-04.7";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
