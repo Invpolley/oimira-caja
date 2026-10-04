@@ -1579,9 +1579,10 @@ function puedeVer(t) {
   return !!MIS.ver[t];
 }
 function aplicarPermisos() {
-  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("hidden", !puedeVer(b.dataset.tab)));
+  // Sin permiso: el botón queda en gris claro y no se puede tocar (sin mensajes). Lo decide el dueño en config.
+  document.querySelectorAll(".tab-btn").forEach(b => { const ok = puedeVer(b.dataset.tab); b.classList.toggle("bloqueada", !ok); b.disabled = !ok; });
   PUEDE_MOV = puedeVer("movimientos");
-  const a = $("movAcceso"); if (a) a.classList.toggle("hidden", !PUEDE_MOV);
+  const a = $("movAcceso"); if (a) { a.classList.toggle("bloqueada", !PUEDE_MOV); const ab = $("movAbrir"); if (ab) ab.disabled = !PUEDE_MOV; }
   if (TAB_ACTUAL === "sinpermiso" || !puedeVer(TAB_ACTUAL)) mostrarTab(TABS_ORDEN.find(puedeVer) || "sinpermiso");
   else mostrarTab(TAB_ACTUAL);
   renderAlertaStock();
@@ -1610,7 +1611,7 @@ function sumarDias(iso, n) {
   return d.toISOString().slice(0, 10);
 }
 async function irADia(fecha) {
-  if (!puedeVer("cierres")) return toast("No tienes acceso a 📅 Cierres (se asigna en config).");
+  if (!puedeVer("cierres")) return;
   mostrarTab("cierres");
   if ($("buscarCierre")) $("buscarCierre").value = "";
   state.rango.desde = fecha; state.rango.hasta = fecha;
@@ -1692,7 +1693,7 @@ async function cargarResumen() {
         <div class="rs-mini"><span class="rs-sub">🌾 Sacos</span><b>${dia.s}</b></div>
       </div>
       <div class="rs-sub mt-1">${dia.t ? `🎫 ${dia.t} tickets · promedio ${fmtR(tprom)}` : ""}</div>
-      <button type="button" class="rs-ver mt-2 w-full py-2.5 bg-amber-600 text-white rounded-xl font-bold text-sm" data-fecha="${L}">Ver el cierre completo ›</button>
+      <button type="button" class="rs-ver mt-2 w-full py-2.5 ${puedeVer("cierres") ? "bg-amber-600 text-white" : "bg-gray-100 text-gray-300 pointer-events-none"} rounded-xl font-bold text-sm" data-fecha="${L}" ${puedeVer("cierres") ? "" : "disabled"}>Ver el cierre completo ›</button>
     </div>`;
   } else {
     html += `<div class="rs-card text-sm text-gray-600">Todavía no hay cierres en los últimos días.</div>`;
@@ -1742,7 +1743,7 @@ async function cargarResumen() {
         <span class="text-right"><b class="mono ${bajo ? "text-red-700" : "text-gray-800"}">${st}</b> <span class="rs-sub">sacos${dias != null && Number(dias) >= 0 ? " · ~" + dias + " días" : ""}</span></span></div>`;
     }).join("");
     html += `<div class="rs-card"><div class="flex justify-between items-center"><div class="text-sm font-bold text-amber-800">🌾 Trigo</div>
-      <button type="button" class="rs-tab text-xs font-semibold text-amber-700" data-tab="trigo">Ver más ›</button></div>${filas}</div>`;
+      <button type="button" class="rs-tab text-xs font-semibold ${puedeVer("trigo") ? "text-amber-700" : "text-gray-300 pointer-events-none"}" data-tab="trigo" ${puedeVer("trigo") ? "" : "disabled"}>Ver más ›</button></div>${filas}</div>`;
     // (el aviso de stock bajo ya sale arriba, en la franja roja global)
   }
   const ultCompra = (state.sacoCompras || []).map(c => c.fecha).sort().pop();
@@ -1793,7 +1794,7 @@ function _histRestaurable(h) {
 }
 async function cargarHistorial(reiniciar) {
   const cont = $("histLista"); if (!cont) return;
-  if (!PUEDE_MOV) { cont.innerHTML = '<div class="rs-card text-sm text-red-700">🔒 Esta área es solo para administradores.</div>'; return; }
+  if (!PUEDE_MOV) { cont.innerHTML = ""; return; }
   if (reiniciar) HIST_LIM = 50;
   const f = ($("histFiltro") && $("histFiltro").value) || "";
   const op = ($("histOp") && $("histOp").value) || "";
@@ -2018,7 +2019,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-10-04.3";
+const APP_BUILD = "2026-10-04.4";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;

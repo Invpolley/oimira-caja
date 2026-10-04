@@ -103,6 +103,10 @@
   .tab-btn span { font-size: 21px; line-height: 1.1; filter: grayscale(.6); opacity: .8; }
   .tab-btn.activa { color: #b45309; background: #fffbeb; }
   .tab-btn.activa span { filter: none; opacity: 1; }
+  /* Sin permiso (lo decide el dueño en config): gris claro y no se puede tocar, sin mensajes */
+  .tab-btn.bloqueada, .tab-btn.bloqueada:active { color: #d6d3d1; background: none; pointer-events: none; cursor: default; }
+  .tab-btn.bloqueada span { filter: grayscale(1); opacity: .3; }
+  #movAcceso.bloqueada { opacity: .4; filter: grayscale(1); pointer-events: none; }
   /* Tarjetas del resumen */
   .rs-card { background: #fff; border-radius: 14px; padding: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,.07); }
   .rs-big { font-size: 26px; font-weight: 800; line-height: 1.1; }
@@ -261,8 +265,6 @@
   <!-- 🏠 RESUMEN (04/10/2026) — lo primero que ve el dueño -->
   <!-- ===================== -->
   <div class="tab-panel" data-panel="sinpermiso">
-    <div class="rs-card text-center py-8"><div class="text-4xl mb-2">🔒</div><p class="font-bold text-amber-900">Todavía no tienes secciones asignadas</p>
-      <p class="text-sm text-gray-600 mt-1">El dueño decide qué puede ver cada administrador en config.fitmassa.com → 👥 Accesos.</p></div>
   </div>
 
   <div class="tab-panel space-y-3" data-panel="resumen">
@@ -640,7 +642,7 @@
   </div>
 
   <!-- 🕓 Movimientos (04/10/2026): solo administradores con el permiso "Ver movimientos y restaurar" -->
-  <div id="movAcceso" class="tab-panel hidden bg-white rounded-xl p-3 card" data-panel="ajustes">
+  <div id="movAcceso" class="tab-panel bg-white rounded-xl p-3 card" data-panel="ajustes">
     <button type="button" id="movAbrir" class="w-full flex items-center gap-3 text-left">
       <span class="text-3xl">🕓</span>
       <span class="flex-1"><span class="block font-bold text-amber-800">Movimientos</span>
@@ -1128,7 +1130,7 @@
 <div id="toast" class="hidden fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-2xl z-50 text-sm font-medium"></div>
 
 <script type="module" src="app.js"></script>
-<div style='position:fixed;bottom:64px;right:9px;font-size:10px;color:#9aa0a6;opacity:.65;pointer-events:none;z-index:99999'>v2026-10-04.3</div>
+<div style='position:fixed;bottom:64px;right:9px;font-size:10px;color:#9aa0a6;opacity:.65;pointer-events:none;z-index:99999'>v2026-10-04.4</div>
 <script>
 /* PWA-RESILIENTE: ping al hosting (el SW deja pasar ?ping=) + estado de red */
 (function(){
