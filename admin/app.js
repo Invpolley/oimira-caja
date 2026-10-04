@@ -1566,12 +1566,13 @@ function mostrarTab(t) {
     try { const C = window.Chart; if (C && C.instances) Object.values(C.instances).forEach(ch => { try { ch.resize(); } catch (e) { /* */ } }); } catch (e) { /* */ }
   });
   if (t === "movimientos") { if (PUEDE_MOV) cargarHistorial(true); else mostrarTab("ajustes"); }
+  if (t === "analisis") cargarAnalisis();
 }
 // Qué puede ver el que entró + avisos (todo se decide en config.fitmassa.com). Copia local para trabajar sin señal.
 const MIS_KEY = "caja_admin_permisos_v1";
 let MIS = null;
 try { MIS = JSON.parse(localStorage.getItem(MIS_KEY) || "null"); } catch (e) { MIS = null; }
-const TABS_ORDEN = ["resumen", "cierres", "trigo", "dinero", "ajustes"];
+const TABS_ORDEN = ["resumen", "cierres", "trigo", "dinero", "analisis", "ajustes"];
 function puedeVer(t) {
   if (t === "sinpermiso") return true;
   if (!MIS || !MIS.ver) return false;
@@ -1754,6 +1755,90 @@ async function cargarResumen() {
   cont.innerHTML = alHtml + html + `<p class="rs-sub text-center">Ventas y gastos en R$ con la tasa de cada día. Actualizado ${new Date().toLocaleTimeString("es-VE", { hour: "2-digit", minute: "2-digit" })}.</p>`;
   cont.querySelectorAll(".rs-ver").forEach(b => b.addEventListener("click", () => irADia(b.dataset.fecha)));
   cont.querySelectorAll(".rs-tab").forEach(b => b.addEventListener("click", () => mostrarTab(b.dataset.tab)));
+}
+
+// ============================================================
+// 📊 Análisis (04/10/2026): estudiar el histórico para saber qué funcionó y prepararse para lo que viene.
+// Datos: public.caja_analisis() → días (venta y gastos en R$ con la tasa de cada día, sacos, tickets) + calendario
+// de feriados y fechas especiales (director_nomina.feriados, se administra en config → 📅 Calendario).
+// ============================================================
+const DOW_NOM = ["", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+let _anChart = null, _anCargado = 0;
+function _media(a) { return a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0; }
+function _pct(a, b) { return b > 0 ? (a / b - 1) * 100 : null; }
+function _pctTxt(p) { if (p == null) return "—"; const r = Math.round(p); return `<b class="${r > 2 ? "rs-up" : r < -2 ? "rs-down" : "rs-flat"}">${r > 0 ? "+" : ""}${r}%</b>`; }
+function _dowIso(iso) { const d = new Date(iso + "T12:00:00Z").getUTCDay(); return d === 0 ? 7 : d; }
+async function cargarAnalisis(forzar) {
+  const cont = $("anCont"); if (!cont) return;
+  if (!forzar && Date.now() - _anCargado < 60000) return;
+  const { data, error } = await sbPagos.rpc("caja_analisis");
+  if (error || !data) { cont.innerHTML = `<div class="rs-card text-sm text-red-700">No se pudo cargar el análisis${error ? ": " + escapeHtml(error.message) : ""}.</div>`; return; }
+  _anCargado = Date.now();
+  const hoy = todayISO();
+  const dias = (data.dias || []).filter(d => d.v > 0);
+  const cal = data.calendario || [];
+  const esp = new Map(cal.map(c => [c.f, c]));
+  if (dias.length < 7) { cont.innerHTML = `<div class="rs-card text-sm">Todavía hay pocos cierres para analizar.</div>`; return; }
+  const normales = dias.filter(d => !esp.has(d.f));
+  // Promedios por día de la semana (sin días especiales)
+  const porDow = {}; for (let i = 1; i <= 7; i++) { const x = normales.filter(d => d.dow === i); porDow[i] = { n: x.length, v: _media(x.map(d => d.v)), g: _media(x.map(d => d.g)), s: _media(x.map(d => d.s)), t: _media(x.map(d => d.t)) }; }
+  const ult30 = dias.filter(d => d.f > sumarDias(hoy, -31));
+  const ventaPorSaco = (() => { const s = ult30.reduce((a, d) => a + d.s, 0); return s ? ult30.reduce((a, d) => a + d.v, 0) / s : 0; })();
+  const ordenDow = [1, 2, 3, 4, 5, 6, 7].sort((a, b) => porDow[b].v - porDow[a].v);
+  let html = `<div class="rs-card"><div class="text-sm font-bold text-amber-800">📊 Análisis del negocio</div>
+    <div class="rs-sub">Con ${dias.length} cierres (desde ${fmtFecha(dias[0].f)}). Ventas y gastos en R$ con la tasa de cada día. Mientras más días se guarden, más seguros son los cálculos.</div></div>`;
+  // 1) Día de la semana
+  html += `<div class="rs-card"><div class="text-sm font-bold text-amber-800">📅 ¿Qué días se vende más?</div>
+    <div class="rs-sub mb-1">Promedio por día normal (sin feriados ni fechas especiales).</div>
+    <div style="height:150px"><canvas id="anChartDow"></canvas></div>
+    <table class="an-tbl mt-2"><tr><th>Día</th><th class="n">Venta</th><th class="n">Gastos</th><th class="n">Sacos</th><th class="n">Días</th></tr>
+    ${[1, 2, 3, 4, 5, 6, 7].map(i => `<tr><td>${DOW_NOM[i]}${i === ordenDow[0] ? " 🏆" : i === ordenDow[6] ? " 🔻" : ""}</td><td class="n mono">${_r0(porDow[i].v)}</td><td class="n mono">${_r0(porDow[i].g)}</td><td class="n">${porDow[i].s.toFixed(1)}</td><td class="n">${porDow[i].n}</td></tr>`).join("")}</table>`;
+  const fs = normales.filter(d => d.dow >= 6), sem = normales.filter(d => d.dow <= 5);
+  html += `<div class="rs-sub mt-2">Fin de semana: <b>${_r0(_media(fs.map(d => d.v)))}</b>/día · Lunes a viernes: <b>${_r0(_media(sem.map(d => d.v)))}</b>/día (${_pctTxt(_pct(_media(fs.map(d => d.v)), _media(sem.map(d => d.v))))} el fin de semana).</div></div>`;
+  // 2) Momento del mes (quincenas)
+  const tramos = [["Días 1–5", 1, 5], ["Días 6–14", 6, 14], ["Días 15–20", 15, 20], ["Días 21–31", 21, 31]];
+  const baseDow = (d) => porDow[d.dow].v || 1;
+  const tr = tramos.map(([n, a, b]) => { const x = normales.filter(d => { const k = Number(d.f.slice(8, 10)); return k >= a && k <= b; }); return { n, k: x.length, p: _media(x.map(d => (d.v / baseDow(d) - 1) * 100)) }; });
+  html += `<div class="rs-card"><div class="text-sm font-bold text-amber-800">🗓 ¿Influye el momento del mes? (quincenas)</div>
+    <div class="rs-sub mb-1">Cuánto se vende en cada tramo comparado con lo normal de ese día de la semana.</div>
+    <table class="an-tbl"><tr><th>Tramo</th><th class="n">vs normal</th><th class="n">Días</th></tr>${tr.map(x => `<tr><td>${x.n}</td><td class="n">${_pctTxt(x.k ? x.p : null)}</td><td class="n">${x.k}</td></tr>`).join("")}</table></div>`;
+  // 3) Fechas especiales que ya pasaron
+  const pasadas = cal.filter(c => c.f <= hoy).map(c => {
+    const d = dias.find(x => x.f === c.f); if (!d) return null;
+    const pv = porDow[d.dow]; const vis = dias.find(x => x.f === sumarDias(c.f, -1));
+    return { c, d, pv: _pct(d.v, pv.v), ps: _pct(d.s, pv.s), pvis: vis ? _pct(vis.v, porDow[vis.dow].v) : null };
+  }).filter(Boolean);
+  const factorTipo = {}; ["feriado", "importante", "evento"].forEach(t => { const x = pasadas.filter(p => p.c.tipo === t && p.pv != null); factorTipo[t] = x.length ? _media(x.map(p => p.pv)) : null; });
+  html += `<div class="rs-card"><div class="text-sm font-bold text-amber-800">🎉 Feriados y fechas especiales: ¿cómo nos fue?</div>
+    <div class="rs-sub mb-1">Venta del día comparada con un ${"día normal"} de la misma semana; "Víspera" = el día antes.</div>
+    ${pasadas.length ? `<table class="an-tbl"><tr><th>Fecha</th><th class="n">Venta</th><th class="n">vs normal</th><th class="n">Víspera</th></tr>
+      ${pasadas.slice().reverse().map(p => `<tr><td><b>${escapeHtml(p.c.nombre)}</b><div class="rs-sub">${fmtFecha(p.c.f)} · ${p.c.tipo === "feriado" ? "feriado" : p.c.tipo === "importante" ? "fecha especial" : escapeHtml(p.c.tipo || "")} · 🌾 ${p.d.s}</div></td><td class="n mono">${_r0(p.d.v)}</td><td class="n">${_pctTxt(p.pv)}</td><td class="n">${_pctTxt(p.pvis)}</td></tr>`).join("")}</table>
+      <div class="rs-sub mt-2">En promedio: feriados ${_pctTxt(factorTipo.feriado)} · fechas especiales ${_pctTxt(factorTipo.importante)} frente a un día normal.</div>`
+      : `<div class="rs-sub">Todavía no hay fechas especiales con cierre guardado.</div>`}</div>`;
+  // 4) Próximas fechas: pronóstico
+  const prox = cal.filter(c => c.f > hoy && c.f <= sumarDias(hoy, 90));
+  html += `<div class="rs-card"><div class="text-sm font-bold text-amber-800">🔮 Próximas fechas: cómo prepararse</div>
+    <div class="rs-sub mb-1">Estimado = lo normal de ese día de la semana ajustado por lo que pasó en fechas parecidas (la misma fecha del año pasado si existe). Sacos = venta estimada ÷ ${ventaPorSaco ? _r0(ventaPorSaco) : "—"} por saco (últimos 30 días).</div>
+    ${prox.length ? `<table class="an-tbl"><tr><th>Fecha</th><th class="n">Venta est.</th><th class="n">Sacos</th></tr>
+      ${prox.map(c => {
+        const dw = _dowIso(c.f), base = porDow[dw].v;
+        const mismo = pasadas.find(p => p.c.nombre === c.nombre && p.c.f.slice(5) === c.f.slice(5));
+        const f = mismo ? mismo.pv : (factorTipo[c.tipo] ?? 0);
+        const est = base * (1 + (f || 0) / 100), sac = ventaPorSaco ? Math.round(est / ventaPorSaco) : null;
+        return `<tr><td><b>${escapeHtml(c.nombre)}</b><div class="rs-sub">${fmtFecha(c.f)} · ${f == null ? "sin historia" : (mismo ? "como el año pasado " : "como otras fechas ") + (f > 0 ? "+" : "") + Math.round(f) + "%"}</div></td><td class="n mono">${_r0(est)}</td><td class="n">${sac ?? "—"}</td></tr>`;
+      }).join("")}</table>` : `<div class="rs-sub">No hay fechas especiales en los próximos 90 días. Se cargan en Configuración → 📅 Calendario.</div>`}</div>`;
+  // 5) Por mes
+  const meses = {}; dias.forEach(d => { const k = d.f.slice(0, 7); (meses[k] = meses[k] || []).push(d); });
+  html += `<div class="rs-card"><div class="text-sm font-bold text-amber-800">📈 Mes a mes</div>
+    <table class="an-tbl"><tr><th>Mes</th><th class="n">Venta</th><th class="n">Gastos</th><th class="n">Prom./día</th><th class="n">Sacos</th></tr>
+    ${Object.keys(meses).sort().reverse().map(k => { const x = meses[k]; const v = x.reduce((a, d) => a + d.v, 0), g = x.reduce((a, d) => a + d.g, 0);
+      return `<tr><td>${k}${k === hoy.slice(0, 7) ? " <span class=\"rs-sub\">(en curso)</span>" : ""}</td><td class="n mono">${_r0(v)}</td><td class="n mono">${_r0(g)}</td><td class="n mono">${_r0(v / x.length)}</td><td class="n">${x.reduce((a, d) => a + d.s, 0)}</td></tr>`; }).join("")}</table></div>`;
+  cont.innerHTML = html;
+  try {
+    if (_anChart) _anChart.destroy();
+    _anChart = new Chart($("anChartDow"), { type: "bar", data: { labels: ["L", "M", "X", "J", "V", "S", "D"], datasets: [{ data: [1, 2, 3, 4, 5, 6, 7].map(i => Math.round(porDow[i].v)), backgroundColor: [1, 2, 3, 4, 5, 6, 7].map(i => i === ordenDow[0] ? "#16a34a" : i === ordenDow[6] ? "#dc2626" : "#f59e0b") }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } } });
+  } catch (e) { /* sin gráfico */ }
 }
 
 // ============================================================
@@ -2019,7 +2104,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-10-04.5";
+const APP_BUILD = "2026-10-04.6";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
