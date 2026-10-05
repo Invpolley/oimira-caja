@@ -2112,7 +2112,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-10-05.1";
+const APP_BUILD = "2026-10-05.2";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
@@ -2389,12 +2389,19 @@ function retTotales(lista) {
     const k = efe ? "E|" + m : r.canal + "|" + m;
     (t[k] = t[k] || { m, c: efe ? "" : canalLabel(r.canal), v: 0 }).v += Number(r.monto || 0);
   });
-  return Object.values(t).sort((a, b) => (a.c ? 1 : 0) - (b.c ? 1 : 0))
-    .map(x => (x.c ? escapeHtml(x.c) + " " : "") + "−" + fmtMoeda(x.v, x.m)).join(" · ");
+  // 2026-10-05: cada canal es una "pastilla" corta (antes era una línea larguísima que se montaba)
+  const chips = Object.values(t).sort((a, b) => (a.c ? 1 : 0) - (b.c ? 1 : 0)).map(x =>
+    `<span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 ${x.c ? "bg-white border border-rose-200" : "bg-rose-600 text-white"}">` +
+    `<span class="text-[10px] ${x.c ? "text-gray-500" : "text-rose-100"}">${x.c ? escapeHtml(retCanalCorto(x.c)) : "Efectivo"}</span>` +
+    `<span class="mono font-bold text-[11.5px] ${x.c ? "text-rose-700" : ""}">−${fmtMoeda(x.v, x.m)}</span></span>`);
+  return `<div class="flex flex-wrap gap-1">${chips.join("")}</div>`;
+}
+function retCanalCorto(label) {
+  return String(label).replace(/\s*\(.*?\)\s*/g, " ").replace(/cuenta corriente/i, "").replace(/\s+/g, " ").trim();
 }
 function retFila(r, conFecha) {
   const pill = (r.canal === "Efectivo" && (r.moeda || "R$") === "R$") ? "" :
-    `<span class="pill pill-gas" style="font-size:10px">${canalIcon(r.canal)} ${escapeHtml(canalLabel(r.canal))}</span> `;
+    `<span class="pill pill-gas" style="font-size:10px">${canalIcon(r.canal)} ${escapeHtml(retCanalCorto(canalLabel(r.canal)))}</span> `;
   if (conFecha) { // vista por tipo: el motivo ya está en el encabezado del grupo
     const titulo = r.destino || r.nota || r.motivo || "Sin detalle";
     const sub = [fmtFecha(r.fecha), r.destino && r.nota ? r.nota : ""].filter(Boolean).map(escapeHtml).join(" · ");
@@ -2425,17 +2432,18 @@ function renderCajaRetiros() {
   }
   let vista = "dia"; try { vista = localStorage.getItem(RET_VISTA_KEY) || "dia"; } catch (e) {}
   const btn = (v, l) => `<button type="button" class="ret-vista px-2 py-0.5 rounded-full border text-[11px] ${vista === v ? "bg-amber-100 border-amber-400 text-amber-900 font-semibold" : "bg-white border-gray-300 text-gray-600"}" data-v="${v}">${l}</button>`;
-  let html = `<div class="flex items-center justify-between gap-2 mb-1 flex-wrap"><div class="flex gap-1">${btn("dia", "📅 Por día")}${btn("tipo", "🏷 Por tipo")}</div>
-    <div class="text-[11px] text-gray-600">${lista.length} retiro(s) · <span class="mono font-semibold text-rose-700">${retTotales(lista)}</span></div></div>`;
+  let html = `<div class="flex gap-1 mb-1">${btn("dia", "📅 Por día")}${btn("tipo", "🏷 Por tipo")}</div>
+    <div class="bg-white border border-rose-200 rounded-lg px-2 py-1.5 mb-1">
+      <div class="text-[11px] text-gray-600 mb-1">Total del período · ${lista.length} retiro(s)</div>${retTotales(lista)}</div>`;
   if (vista === "tipo") {
     const g = {};
     lista.forEach(r => { const k = r.motivo || "Sin motivo"; (g[k] = g[k] || []).push(r); });
     const peso = (arr) => arr.reduce((s, r) => s + Number(r.monto || 0) * ((r.moeda || "R$") === "Bs" ? 0.001 : (r.moeda === "USD" ? 5 : 1)), 0);
     html += Object.entries(g).sort((a, b) => peso(b[1]) - peso(a[1])).map(([k, arr]) => `
       <details class="bg-rose-50 border border-rose-200 rounded-lg">
-        <summary class="flex flex-wrap items-center justify-between gap-x-2 px-2 py-1.5 cursor-pointer text-[13px]">
+        <summary class="px-2 py-1.5 cursor-pointer text-[13px]">
           <span class="font-semibold text-rose-900">${escapeHtml(k)} · ${arr.length}</span>
-          <span class="mono font-bold text-rose-700 text-[12px] text-right ml-auto">${retTotales(arr)}</span>
+          <div class="mt-1">${retTotales(arr)}</div>
         </summary>
         <div class="bg-white rounded-b-lg">${arr.map(r => retFila(r, true)).join("")}</div>
       </details>`).join("");
@@ -2444,8 +2452,8 @@ function renderCajaRetiros() {
     lista.forEach(r => { (d[r.fecha] = d[r.fecha] || []).push(r); });
     html += Object.keys(d).sort((a, b) => String(b).localeCompare(String(a))).map(f => `
       <div class="bg-rose-50 border border-rose-200 rounded-lg overflow-hidden">
-        <div class="flex items-center justify-between px-2 py-1 bg-rose-100 text-[12px] font-semibold text-rose-900">
-          <span>${fmtFecha(f)} · ${d[f].length}</span><span class="mono text-right">${retTotales(d[f])}</span></div>
+        <div class="px-2 py-1 bg-rose-100 text-[12px] font-semibold text-rose-900">
+          <div class="mb-1">${fmtFecha(f)} · ${d[f].length} retiro(s)</div>${retTotales(d[f])}</div>
         <div class="bg-white">${d[f].map(r => retFila(r, false)).join("")}</div>
       </div>`).join("");
   }
