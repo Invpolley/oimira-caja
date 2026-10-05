@@ -2112,7 +2112,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-10-04.7";
+const APP_BUILD = "2026-10-05.1";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
@@ -2378,7 +2378,96 @@ function renderCajaSaldos() {
     : "—";
 }
 
+// 2026-10-05 (Polley): retiros "A + C" — por día (compacto) o por tipo (bloques que se abren),
+// totales por moneda, etiqueta solo si no es efectivo R$, y borrar desde el detalle (no en cada fila).
+const RET_VISTA_KEY = "caja_admin_retiros_vista_v1";
+function retTotales(lista) {
+  // efectivo se suma por moneda; los demás canales (PIX, punto, etc.) aparte, con su nombre
+  const t = {};
+  lista.forEach(r => {
+    const m = r.moeda || "R$", efe = r.canal === "Efectivo";
+    const k = efe ? "E|" + m : r.canal + "|" + m;
+    (t[k] = t[k] || { m, c: efe ? "" : canalLabel(r.canal), v: 0 }).v += Number(r.monto || 0);
+  });
+  return Object.values(t).sort((a, b) => (a.c ? 1 : 0) - (b.c ? 1 : 0))
+    .map(x => (x.c ? escapeHtml(x.c) + " " : "") + "−" + fmtMoeda(x.v, x.m)).join(" · ");
+}
+function retFila(r, conFecha) {
+  const pill = (r.canal === "Efectivo" && (r.moeda || "R$") === "R$") ? "" :
+    `<span class="pill pill-gas" style="font-size:10px">${canalIcon(r.canal)} ${escapeHtml(canalLabel(r.canal))}</span> `;
+  if (conFecha) { // vista por tipo: el motivo ya está en el encabezado del grupo
+    const titulo = r.destino || r.nota || r.motivo || "Sin detalle";
+    const sub = [fmtFecha(r.fecha), r.destino && r.nota ? r.nota : ""].filter(Boolean).map(escapeHtml).join(" · ");
+    return retFilaHtml(r, pill + escapeHtml(titulo), sub);
+  }
+  const sub = [r.destino ? escapeHtml(r.destino) : "", r.nota ? escapeHtml(r.nota) : ""].filter(Boolean).join(" · ");
+  return retFilaHtml(r, pill + escapeHtml(r.motivo || "Sin motivo"), sub);
+}
+function retFilaHtml(r, titulo, sub) {
+  return `<div class="ret-fila border-b border-rose-100 last:border-0" data-id="${r.id}">
+    <button type="button" class="ret-abrir w-full flex items-center justify-between gap-2 px-2 py-1.5 text-left">
+      <div class="min-w-0"><div class="text-[13px] font-semibold text-rose-900 truncate">${titulo}</div>
+        ${sub ? `<div class="text-[11px] text-gray-600 truncate">${sub}</div>` : ""}</div>
+      <div class="mono font-bold text-rose-700 whitespace-nowrap text-[13px]">−${fmtMoeda(r.monto, r.moeda)}</div>
+    </button>
+    <div class="ret-det hidden px-2 pb-2 text-[11px] text-gray-700">
+      <div>${fmtFecha(r.fecha)} · ${canalIcon(r.canal)} ${escapeHtml(canalLabel(r.canal))}${r.destino ? " · → " + escapeHtml(r.destino) : ""}</div>
+      ${r.nota ? `<div>${escapeHtml(r.nota)}</div>` : ""}
+      <button type="button" class="retiro-del mt-1 text-red-600 underline" data-id="${r.id}">🗑 Eliminar este retiro</button>
+    </div></div>`;
+}
 function renderCajaRetiros() {
+  const cont = $("cajaRetirosList");
+  const lista = state.cajaRetiros || [];
+  if (!lista.length) {
+    cont.innerHTML = `<div class="text-xs text-gray-500 italic">Sin retiros en el período</div>`;
+    return;
+  }
+  let vista = "dia"; try { vista = localStorage.getItem(RET_VISTA_KEY) || "dia"; } catch (e) {}
+  const btn = (v, l) => `<button type="button" class="ret-vista px-2 py-0.5 rounded-full border text-[11px] ${vista === v ? "bg-amber-100 border-amber-400 text-amber-900 font-semibold" : "bg-white border-gray-300 text-gray-600"}" data-v="${v}">${l}</button>`;
+  let html = `<div class="flex items-center justify-between gap-2 mb-1 flex-wrap"><div class="flex gap-1">${btn("dia", "📅 Por día")}${btn("tipo", "🏷 Por tipo")}</div>
+    <div class="text-[11px] text-gray-600">${lista.length} retiro(s) · <span class="mono font-semibold text-rose-700">${retTotales(lista)}</span></div></div>`;
+  if (vista === "tipo") {
+    const g = {};
+    lista.forEach(r => { const k = r.motivo || "Sin motivo"; (g[k] = g[k] || []).push(r); });
+    const peso = (arr) => arr.reduce((s, r) => s + Number(r.monto || 0) * ((r.moeda || "R$") === "Bs" ? 0.001 : (r.moeda === "USD" ? 5 : 1)), 0);
+    html += Object.entries(g).sort((a, b) => peso(b[1]) - peso(a[1])).map(([k, arr]) => `
+      <details class="bg-rose-50 border border-rose-200 rounded-lg">
+        <summary class="flex flex-wrap items-center justify-between gap-x-2 px-2 py-1.5 cursor-pointer text-[13px]">
+          <span class="font-semibold text-rose-900">${escapeHtml(k)} · ${arr.length}</span>
+          <span class="mono font-bold text-rose-700 text-[12px] text-right ml-auto">${retTotales(arr)}</span>
+        </summary>
+        <div class="bg-white rounded-b-lg">${arr.map(r => retFila(r, true)).join("")}</div>
+      </details>`).join("");
+  } else {
+    const d = {};
+    lista.forEach(r => { (d[r.fecha] = d[r.fecha] || []).push(r); });
+    html += Object.keys(d).sort((a, b) => String(b).localeCompare(String(a))).map(f => `
+      <div class="bg-rose-50 border border-rose-200 rounded-lg overflow-hidden">
+        <div class="flex items-center justify-between px-2 py-1 bg-rose-100 text-[12px] font-semibold text-rose-900">
+          <span>${fmtFecha(f)} · ${d[f].length}</span><span class="mono text-right">${retTotales(d[f])}</span></div>
+        <div class="bg-white">${d[f].map(r => retFila(r, false)).join("")}</div>
+      </div>`).join("");
+  }
+  cont.innerHTML = html;
+  cont.querySelectorAll(".ret-vista").forEach(b => b.addEventListener("click", () => {
+    try { localStorage.setItem(RET_VISTA_KEY, b.dataset.v); } catch (e) {}
+    renderCajaRetiros();
+  }));
+  cont.querySelectorAll(".ret-abrir").forEach(b => b.addEventListener("click", () => {
+    b.parentElement.querySelector(".ret-det").classList.toggle("hidden");
+  }));
+  cont.querySelectorAll(".retiro-del").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("¿Eliminar este retiro?\n\nSi fue un error, se puede recuperar en ⚙️ Ajustes → 🕓 Historial.")) return;
+      const { error } = await sb.from("caja_retiro").delete().eq("id", btn.dataset.id);
+      if (error) { toast("Error: " + error.message); return; }
+      toast("Retiro eliminado (recuperable en 🕓 Historial)");
+      reload();
+    });
+  });
+}
+function renderCajaRetirosViejo() {
   const cont = $("cajaRetirosList");
   if (!state.cajaRetiros.length) {
     cont.innerHTML = `<div class="text-xs text-gray-500 italic">Sin retiros en el período</div>`;
