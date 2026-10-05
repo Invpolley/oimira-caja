@@ -2112,7 +2112,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-10-05.2";
+const APP_BUILD = "2026-10-05.3";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
@@ -2381,6 +2381,15 @@ function renderCajaSaldos() {
 // 2026-10-05 (Polley): retiros "A + C" — por día (compacto) o por tipo (bloques que se abren),
 // totales por moneda, etiqueta solo si no es efectivo R$, y borrar desde el detalle (no en cada fila).
 const RET_VISTA_KEY = "caja_admin_retiros_vista_v1";
+// Colores (regla de Polley, 05/10/2026): ROJO solo para lo negativo (sale dinero), VERDE para lo positivo
+// (entra dinero), NARANJA para prestar atención (ajustes). Fondos neutros (blanco/gris).
+// En caja_retiro: monto > 0 = sale; monto < 0 = entra (ingreso/sobrante, ver "INGRESAR DINERO").
+function retMonto(v, m, extra) {
+  const n = Number(v || 0);
+  const sale = n >= 0;
+  return `<span class="mono font-bold whitespace-nowrap ${sale ? "text-red-600" : "text-green-700"} ${extra || ""}">${sale ? "−" : "+"}${fmtMoeda(Math.abs(n), m)}</span>`;
+}
+function retAtencion(r) { return /ajust/i.test((r.motivo || "") + " " + (r.nota || "")); }
 function retTotales(lista) {
   // efectivo se suma por moneda; los demás canales (PIX, punto, etc.) aparte, con su nombre
   const t = {};
@@ -2389,11 +2398,10 @@ function retTotales(lista) {
     const k = efe ? "E|" + m : r.canal + "|" + m;
     (t[k] = t[k] || { m, c: efe ? "" : canalLabel(r.canal), v: 0 }).v += Number(r.monto || 0);
   });
-  // 2026-10-05: cada canal es una "pastilla" corta (antes era una línea larguísima que se montaba)
   const chips = Object.values(t).sort((a, b) => (a.c ? 1 : 0) - (b.c ? 1 : 0)).map(x =>
-    `<span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 ${x.c ? "bg-white border border-rose-200" : "bg-rose-600 text-white"}">` +
-    `<span class="text-[10px] ${x.c ? "text-gray-500" : "text-rose-100"}">${x.c ? escapeHtml(retCanalCorto(x.c)) : "Efectivo"}</span>` +
-    `<span class="mono font-bold text-[11.5px] ${x.c ? "text-rose-700" : ""}">−${fmtMoeda(x.v, x.m)}</span></span>`);
+    `<span class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 bg-white border ${x.c ? "border-gray-200" : "border-gray-400"}">` +
+    `<span class="text-[10px] ${x.c ? "text-gray-500" : "text-gray-800 font-semibold"}">${x.c ? escapeHtml(retCanalCorto(x.c)) : "💵 Efectivo"}</span>` +
+    retMonto(x.v, x.m, x.c ? "text-[11.5px]" : "text-[12.5px]") + `</span>`);
   return `<div class="flex flex-wrap gap-1">${chips.join("")}</div>`;
 }
 function retCanalCorto(label) {
@@ -2401,26 +2409,27 @@ function retCanalCorto(label) {
 }
 function retFila(r, conFecha) {
   const pill = (r.canal === "Efectivo" && (r.moeda || "R$") === "R$") ? "" :
-    `<span class="pill pill-gas" style="font-size:10px">${canalIcon(r.canal)} ${escapeHtml(retCanalCorto(canalLabel(r.canal)))}</span> `;
+    `<span class="inline-block rounded px-1.5 bg-gray-100 text-gray-700 text-[10px] font-normal">${canalIcon(r.canal)} ${escapeHtml(retCanalCorto(canalLabel(r.canal)))}</span> `;
+  const ojo = retAtencion(r) ? `<span class="inline-block rounded px-1.5 bg-orange-100 text-orange-800 text-[10px] font-semibold">⚠ ajuste</span> ` : "";
   if (conFecha) { // vista por tipo: el motivo ya está en el encabezado del grupo
     const titulo = r.destino || r.nota || r.motivo || "Sin detalle";
     const sub = [fmtFecha(r.fecha), r.destino && r.nota ? r.nota : ""].filter(Boolean).map(escapeHtml).join(" · ");
-    return retFilaHtml(r, pill + escapeHtml(titulo), sub);
+    return retFilaHtml(r, ojo + pill + escapeHtml(titulo), sub);
   }
   const sub = [r.destino ? escapeHtml(r.destino) : "", r.nota ? escapeHtml(r.nota) : ""].filter(Boolean).join(" · ");
-  return retFilaHtml(r, pill + escapeHtml(r.motivo || "Sin motivo"), sub);
+  return retFilaHtml(r, ojo + pill + escapeHtml(r.motivo || "Sin motivo"), sub);
 }
 function retFilaHtml(r, titulo, sub) {
-  return `<div class="ret-fila border-b border-rose-100 last:border-0" data-id="${r.id}">
+  return `<div class="ret-fila border-b border-gray-100 last:border-0 ${retAtencion(r) ? "bg-orange-50" : ""}" data-id="${r.id}">
     <button type="button" class="ret-abrir w-full flex items-center justify-between gap-2 px-2 py-1.5 text-left">
-      <div class="min-w-0"><div class="text-[13px] font-semibold text-rose-900 truncate">${titulo}</div>
-        ${sub ? `<div class="text-[11px] text-gray-600 truncate">${sub}</div>` : ""}</div>
-      <div class="mono font-bold text-rose-700 whitespace-nowrap text-[13px]">−${fmtMoeda(r.monto, r.moeda)}</div>
+      <div class="min-w-0"><div class="text-[13px] font-semibold text-gray-800 truncate">${titulo}</div>
+        ${sub ? `<div class="text-[11px] text-gray-500 truncate">${sub}</div>` : ""}</div>
+      ${retMonto(r.monto, r.moeda, "text-[13px]")}
     </button>
     <div class="ret-det hidden px-2 pb-2 text-[11px] text-gray-700">
       <div>${fmtFecha(r.fecha)} · ${canalIcon(r.canal)} ${escapeHtml(canalLabel(r.canal))}${r.destino ? " · → " + escapeHtml(r.destino) : ""}</div>
       ${r.nota ? `<div>${escapeHtml(r.nota)}</div>` : ""}
-      <button type="button" class="retiro-del mt-1 text-red-600 underline" data-id="${r.id}">🗑 Eliminar este retiro</button>
+      <button type="button" class="retiro-del mt-1 text-red-600 underline" data-id="${r.id}">🗑 Eliminar este movimiento</button>
     </div></div>`;
 }
 function renderCajaRetiros() {
@@ -2431,18 +2440,19 @@ function renderCajaRetiros() {
     return;
   }
   let vista = "dia"; try { vista = localStorage.getItem(RET_VISTA_KEY) || "dia"; } catch (e) {}
-  const btn = (v, l) => `<button type="button" class="ret-vista px-2 py-0.5 rounded-full border text-[11px] ${vista === v ? "bg-amber-100 border-amber-400 text-amber-900 font-semibold" : "bg-white border-gray-300 text-gray-600"}" data-v="${v}">${l}</button>`;
+  const btn = (v, l) => `<button type="button" class="ret-vista px-2 py-0.5 rounded-full border text-[11px] ${vista === v ? "bg-gray-800 border-gray-800 text-white font-semibold" : "bg-white border-gray-300 text-gray-600"}" data-v="${v}">${l}</button>`;
+  const nAj = lista.filter(retAtencion).length;
   let html = `<div class="flex gap-1 mb-1">${btn("dia", "📅 Por día")}${btn("tipo", "🏷 Por tipo")}</div>
-    <div class="bg-white border border-rose-200 rounded-lg px-2 py-1.5 mb-1">
-      <div class="text-[11px] text-gray-600 mb-1">Total del período · ${lista.length} retiro(s)</div>${retTotales(lista)}</div>`;
+    <div class="bg-white border border-gray-200 rounded-lg px-2 py-1.5 mb-1">
+      <div class="text-[11px] text-gray-600 mb-1">Total del período · ${lista.length} movimiento(s)${nAj ? ` · <span class="text-orange-700 font-semibold">⚠ ${nAj} ajuste(s)</span>` : ""}</div>${retTotales(lista)}</div>`;
   if (vista === "tipo") {
     const g = {};
     lista.forEach(r => { const k = r.motivo || "Sin motivo"; (g[k] = g[k] || []).push(r); });
-    const peso = (arr) => arr.reduce((s, r) => s + Number(r.monto || 0) * ((r.moeda || "R$") === "Bs" ? 0.001 : (r.moeda === "USD" ? 5 : 1)), 0);
+    const peso = (arr) => arr.reduce((s, r) => s + Math.abs(Number(r.monto || 0)) * ((r.moeda || "R$") === "Bs" ? 0.001 : (r.moeda === "USD" ? 5 : 1)), 0);
     html += Object.entries(g).sort((a, b) => peso(b[1]) - peso(a[1])).map(([k, arr]) => `
-      <details class="bg-rose-50 border border-rose-200 rounded-lg">
+      <details class="bg-gray-50 border ${arr.some(retAtencion) ? "border-orange-300" : "border-gray-200"} rounded-lg">
         <summary class="px-2 py-1.5 cursor-pointer text-[13px]">
-          <span class="font-semibold text-rose-900">${escapeHtml(k)} · ${arr.length}</span>
+          <span class="font-semibold text-gray-800">${escapeHtml(k)} · ${arr.length}</span>
           <div class="mt-1">${retTotales(arr)}</div>
         </summary>
         <div class="bg-white rounded-b-lg">${arr.map(r => retFila(r, true)).join("")}</div>
@@ -2451,9 +2461,9 @@ function renderCajaRetiros() {
     const d = {};
     lista.forEach(r => { (d[r.fecha] = d[r.fecha] || []).push(r); });
     html += Object.keys(d).sort((a, b) => String(b).localeCompare(String(a))).map(f => `
-      <div class="bg-rose-50 border border-rose-200 rounded-lg overflow-hidden">
-        <div class="px-2 py-1 bg-rose-100 text-[12px] font-semibold text-rose-900">
-          <div class="mb-1">${fmtFecha(f)} · ${d[f].length} retiro(s)</div>${retTotales(d[f])}</div>
+      <div class="border border-gray-200 rounded-lg overflow-hidden">
+        <div class="px-2 py-1 bg-gray-100 text-[12px] font-semibold text-gray-800">
+          <div class="mb-1">${fmtFecha(f)} · ${d[f].length} movimiento(s)</div>${retTotales(d[f])}</div>
         <div class="bg-white">${d[f].map(r => retFila(r, false)).join("")}</div>
       </div>`).join("");
   }
