@@ -1567,12 +1567,96 @@ function mostrarTab(t) {
   });
   if (t === "movimientos") { if (PUEDE_MOV) cargarHistorial(true); else mostrarTab("ajustes"); }
   if (t === "analisis") cargarAnalisis();
+  if (t === "avisos") cargarAvisos();
+}
+
+// ============================================================
+// 📢 Avisos al equipo (07/10/2026, Polley): mensaje obligatorio que el colaborador ve en la app Equipo
+// debajo de "Mi jornada" y debe marcar como leído; si no lo marca a tiempo se le descuenta del bono.
+// Monto, plazo y quién puede enviar: config.fitmassa.com. RPCs caja_avisos_datos / caja_aviso_enviar / caja_aviso_archivar.
+// ============================================================
+let AV = null, AV_SEL = new Set();
+function avFecha(iso) { try { return new Date(iso).toLocaleString("es-VE", { timeZone: "America/Caracas", day: "2-digit", month: "short", hour: "numeric", minute: "2-digit" }); } catch (e) { return iso; } }
+async function cargarAvisos() {
+  const cont = $("avCont"); if (!cont) return;
+  try {
+    const { data, error } = await sbPagos.rpc("caja_avisos_datos");
+    if (error) throw error;
+    AV = data;
+  } catch (e) {
+    cont.innerHTML = `<div class="rs-card text-sm">${/fetch|network|conexi/i.test(String(e.message || e)) ? "📵 Sin señal: los avisos se envían y se consultan con internet." : "❌ " + escapeHtml(e.message || String(e))}</div>`;
+    return;
+  }
+  pintarAvisos();
+}
+function pintarAvisos() {
+  const cont = $("avCont"); const aj = AV.ajustes || {}; const emps = AV.empleados || [];
+  const grupos = [...new Set(emps.map(e => e.grupo).filter(Boolean))].sort();
+  const lista = (AV.avisos || []).filter(a => !a.archivado);
+  const card = (a) => {
+    const ps = a.personas || []; const leidos = ps.filter(p => p.leido_at).length; const vencido = new Date(a.vence) < new Date();
+    const pend = ps.filter(p => !p.leido_at || new Date(p.leido_at) > new Date(a.vence));
+    return `<div class="rs-card">
+      <div class="flex justify-between gap-2"><div class="font-semibold text-gray-800">${escapeHtml(a.titulo)}</div>
+        <div class="text-[11px] whitespace-nowrap ${leidos === ps.length ? "text-green-700 font-semibold" : "text-gray-600"}">${leidos}/${ps.length} leídos</div></div>
+      <div class="text-[13px] text-gray-700 mt-1 whitespace-pre-line">${escapeHtml(a.texto)}</div>
+      <div class="text-[11px] text-gray-500 mt-1">${avFecha(a.creado)} · ${escapeHtml(a.enviado_por || "")} · ${escapeHtml(a.destino_detalle || "")} · ${vencido ? "plazo vencido" : "vence " + avFecha(a.vence)}</div>
+      ${pend.length ? `<div class="mt-2 text-[12px] ${vencido ? "bg-red-50 text-red-700" : "bg-orange-50 text-orange-800"} rounded-lg px-2 py-1">${vencido ? `❌ Sin leer a tiempo (−R$ ${a.monto_descuento} del bono c/u)` : "⏳ Faltan por leer"}: ${pend.map(p => escapeHtml(p.nombre.split(" ").slice(0, 2).join(" "))).join(", ")}</div>`
+        : `<div class="mt-2 text-[12px] bg-green-50 text-green-700 rounded-lg px-2 py-1">✅ Todos lo leyeron</div>`}
+      <div class="mt-2"><button type="button" class="av-arch text-[11px] text-gray-500 underline" data-id="${a.id}">Archivar (sigue contando para el bono)</button></div>
+    </div>`;
+  };
+  cont.innerHTML = `
+    <div class="rs-card">
+      <div class="font-bold text-gray-800">📢 Nuevo aviso al equipo</div>
+      <div class="text-[12px] text-gray-500 mb-2">Le aparece en la app Equipo debajo de "Mi jornada". Tiene <b>${aj.plazo_horas || 24} h</b> para marcarlo como leído; si no, se le descuentan <b class="text-red-600">R$ ${aj.monto_descuento ?? 20}</b> del bono de la semana. ${aj.activo === false ? '<b class="text-orange-700">⚠ Los avisos están apagados en Configuración.</b>' : ""}</div>
+      <input id="avTit" maxlength="80" placeholder="Título (ej. Reunión el lunes 7 am)" class="w-full border rounded-lg px-2 py-1.5 text-sm mb-2">
+      <textarea id="avTxt" rows="4" placeholder="Escribe el mensaje…" class="w-full border rounded-lg px-2 py-1.5 text-sm mb-2"></textarea>
+      <div class="flex gap-2 flex-wrap text-sm mb-2">
+        <label class="flex items-center gap-1"><input type="radio" name="avDest" value="todos" checked> Todo el equipo</label>
+        ${grupos.length ? `<label class="flex items-center gap-1"><input type="radio" name="avDest" value="grupo"> Un grupo</label>` : ""}
+        <label class="flex items-center gap-1"><input type="radio" name="avDest" value="personas"> Elegir personas</label>
+      </div>
+      <select id="avGrupo" class="hidden w-full border rounded-lg px-2 py-1.5 text-sm mb-2">${grupos.map(g => `<option>${escapeHtml(g)}</option>`).join("")}</select>
+      <div id="avPers" class="hidden max-h-56 overflow-y-auto border rounded-lg p-2 mb-2 text-sm">${emps.map(e => `<label class="flex items-center gap-2 py-0.5"><input type="checkbox" class="av-p" value="${e.id}" ${AV_SEL.has(e.id) ? "checked" : ""}> ${escapeHtml(e.nombre)} <span class="text-[11px] text-gray-400">${escapeHtml(e.grupo || "")}</span></label>`).join("")}</div>
+      <button type="button" id="avEnviar" class="w-full bg-gray-900 text-white rounded-lg py-2 font-semibold">📢 Enviar aviso</button>
+      <div id="avMsg" class="text-[12px] mt-1"></div>
+    </div>
+    <div class="font-semibold text-gray-700 text-sm px-1">Avisos enviados (últimos 60 días)</div>
+    ${lista.map(card).join("") || '<div class="rs-card text-sm text-gray-500">Todavía no hay avisos.</div>'}`;
+  const destSel = () => (document.querySelector('input[name="avDest"]:checked') || {}).value || "todos";
+  document.querySelectorAll('input[name="avDest"]').forEach(r => r.addEventListener("change", () => {
+    $("avGrupo").classList.toggle("hidden", destSel() !== "grupo"); $("avPers").classList.toggle("hidden", destSel() !== "personas");
+  }));
+  document.querySelectorAll(".av-p").forEach(c => c.addEventListener("change", () => { if (c.checked) AV_SEL.add(c.value); else AV_SEL.delete(c.value); }));
+  $("avEnviar").addEventListener("click", async () => {
+    const tit = $("avTit").value.trim(), txt = $("avTxt").value.trim(), d = destSel(), msg = $("avMsg");
+    if (!tit || !txt) { msg.textContent = "Escribe el título y el mensaje."; msg.className = "text-[12px] mt-1 text-red-600"; return; }
+    if (d === "personas" && !AV_SEL.size) { msg.textContent = "Elige al menos una persona."; msg.className = "text-[12px] mt-1 text-red-600"; return; }
+    const quien = d === "todos" ? "TODO el equipo" : d === "grupo" ? "el grupo " + $("avGrupo").value : AV_SEL.size + " persona(s)";
+    if (!confirm(`¿Enviar este aviso a ${quien}?\n\nTendrán ${aj.plazo_horas || 24} h para marcarlo como leído o se les descuentan R$ ${aj.monto_descuento ?? 20} del bono.`)) return;
+    const b = $("avEnviar"); b.disabled = true; b.textContent = "Enviando…";
+    try {
+      const { data, error } = await sbPagos.rpc("caja_aviso_enviar", { p_titulo: tit, p_texto: txt, p_destino: d, p_grupo: d === "grupo" ? $("avGrupo").value : null, p_empleados: d === "personas" ? [...AV_SEL] : null });
+      if (error) throw error;
+      AV_SEL = new Set(); toast(`📢 Aviso enviado a ${data.destinatarios} persona(s)`);
+      await cargarAvisos();
+    } catch (e) {
+      msg.textContent = /fetch|network/i.test(String(e.message || e)) ? "📵 Sin señal: no se envió. Inténtalo con internet." : "❌ " + (e.message || e);
+      msg.className = "text-[12px] mt-1 text-red-600"; b.disabled = false; b.textContent = "📢 Enviar aviso";
+    }
+  });
+  document.querySelectorAll(".av-arch").forEach(b => b.addEventListener("click", async () => {
+    const { error } = await sbPagos.rpc("caja_aviso_archivar", { p_id: b.dataset.id, p_archivar: true });
+    if (error) return toast("❌ " + error.message);
+    await cargarAvisos();
+  }));
 }
 // Qué puede ver el que entró + avisos (todo se decide en config.fitmassa.com). Copia local para trabajar sin señal.
 const MIS_KEY = "caja_admin_permisos_v1";
 let MIS = null;
 try { MIS = JSON.parse(localStorage.getItem(MIS_KEY) || "null"); } catch (e) { MIS = null; }
-const TABS_ORDEN = ["resumen", "cierres", "trigo", "dinero", "analisis", "ajustes"];
+const TABS_ORDEN = ["resumen", "cierres", "trigo", "dinero", "analisis", "avisos", "ajustes"];
 function puedeVer(t) {
   if (t === "sinpermiso") return true;
   if (!MIS || !MIS.ver) return false;
@@ -2112,7 +2196,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-10-05.3";
+const APP_BUILD = "2026-10-07.1";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
