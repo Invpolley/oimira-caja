@@ -564,7 +564,7 @@ function renderDias() {
         <div class="mt-3 p-2 bg-white border border-amber-300 rounded-lg text-xs space-y-1">
           <div class="font-bold text-amber-800 flex items-center justify-between">
             <span>💱 Tasas del día ${k.legacyRates ? '<span class="text-[10px] text-gray-500 italic">(default — cierre legacy)</span>' : ''}</span>
-            <span class="mono text-amber-700">1 Bs = ${k.tasaBs.toFixed(4)} R$ · 1 USD = ${k.tasaUsd.toFixed(4)} R$</span>
+            <span class="mono text-amber-700">1 R$ = ${k.tasaBs > 0 ? (1 / k.tasaBs).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"} Bs · 1 USD = ${k.tasaBs > 0 ? (k.tasaUsd / k.tasaBs).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"} Bs</span>
           </div>
           <div class="flex justify-between pt-1 border-t border-gray-200">
             <span>🏆 Gran Total Venta (R$ equiv):</span>
@@ -2196,7 +2196,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-10-07.1";
+const APP_BUILD = "2026-10-10.1";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;

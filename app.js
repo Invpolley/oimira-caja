@@ -552,9 +552,12 @@ function updateTotals() {
     efqEl.className = "text-xl mono font-black " + (efectivoQueda < 0 ? "text-red-700" : "text-amber-900");
   }
 
-  // Preview de tasas (labels "1 Bs = X R$")
-  setTxt("tasaBsPreview", tbs.toLocaleString("pt-BR", {minimumFractionDigits: 4, maximumFractionDigits: 6}));
-  setTxt("tasaUsdPreview", tusd.toLocaleString("pt-BR", {minimumFractionDigits: 4, maximumFractionDigits: 4}));
+  // Preview de tasas (10/10/2026, pedido de Polley): se muestra "1 R$ = X Bs" y "1 USD = X Bs".
+  // Internamente el cierre sigue guardando 1 Bs = X R$ (tasa_bs_rs) para no tocar cierres viejos.
+  const fBs = (n) => (n > 0 && isFinite(n)) ? n.toLocaleString("es-VE", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "—";
+  setTxt("tasaBsPreview", fBs(tbs > 0 ? 1 / tbs : 0));
+  setTxt("tasaUsdBsPreview", fBs(tbs > 0 ? tusd / tbs : 0));
+  setTxt("tasaUsdPreview", tusd.toLocaleString("es-VE", {minimumFractionDigits: 2, maximumFractionDigits: 4}));
 
   // Warning si faltan tasas con montos
   const hayBsSinTasa  = (sumBsIng > 0 || sumBsGas > 0) && tbs  === 0;
@@ -1557,7 +1560,7 @@ window.addEventListener("appinstalled", () => {
 })();
 
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const APP_BUILD = "2026-10-07.1";
+const APP_BUILD = "2026-10-10.1";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
 
 // ============================================================================
