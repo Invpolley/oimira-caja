@@ -2196,7 +2196,7 @@ async function cargarVinculosPagos(moeda) {
   } catch (e) { /* sin conexion: no molestar */ }
 })();
 
-const APP_BUILD = "2026-10-14.1";
+const APP_BUILD = "2026-10-18.1";
 
 if ("serviceWorker" in navigator) {
   let recargando = false;
