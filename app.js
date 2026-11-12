@@ -182,6 +182,7 @@ const state = {
   tickets: 0,
   observacoes: "",
   cierreId: null, // UUID del cierre actual (si ya existe en DB)
+  serverUpdatedAt: null, // updated_at del cierre que este equipo vio en el servidor (para detectar cambios hechos desde otro equipo)
   transmittedAt: null,  // si está seteado = cierre oficialmente cerrado
   unlockUntil: 0,       // ms timestamp hasta cuando el modo edición sigue activo
   tasaBsRs:  TASA_BS_DEFAULT,   // 1 Bs = X R$ para este cierre (se reemplaza por la vigente al cargar)
@@ -689,6 +690,10 @@ function ensureIngresosPresets() {
 }
 
 async function loadExistingCierre() {
+  // 11/11/2026 (auditoría sin internet): si este equipo tiene un envío pendiente de este día, lo que vale es lo que
+  // está en este equipo; no se pisa la pantalla con la versión (más vieja) del servidor. Los que quedaron en conflicto
+  // sí dejan ver la versión del servidor, para poder comparar y decidir.
+  if (colaCierreLeer().some(x => x.fecha === state.fecha && !x.conflicto)) return;
   // Intentar traer el cierre del día si ya existe
   const { data, error } = await supabase
     .from('dia_cierre')
@@ -699,6 +704,7 @@ async function loadExistingCierre() {
   if (error || !data) return;
 
   state.cierreId = data.id;
+  state.serverUpdatedAt = data.updated_at || null;
   state.cajera = data.cajera || CAJERA_DEFAULT;
   state.sacosTrigo = data.sacos_trigo || 0;
   state.tickets = data.tickets || 0;
@@ -766,6 +772,7 @@ function bindStatic() {
   fechaInput.addEventListener("change", async (e) => {
     state.fecha = e.target.value;
     state.cierreId = null;
+    state.serverUpdatedAt = null;
     state.ingresos = [];
     state.gastos = [];
     state.sacos = [];
@@ -947,6 +954,7 @@ function bindStatic() {
       state.tickets = 0;
       state.observacoes = "";
       state.cierreId = null;
+      state.serverUpdatedAt = null;
       state.transmittedAt = null;
       state.unlockUntil = 0;
       // Re-cargar desde DB (por si hay cierre oficial que debe verse)
@@ -1279,6 +1287,8 @@ async function enviarCierre(transmitir = true) {
     const paquete = {
       fecha: state.fecha,
       cierreId: state.cierreId || null,
+      equipo: cajaEquipoId(),                    // qué equipo lo envía
+      base: state.serverUpdatedAt || null,       // qué versión del servidor vio este equipo (null = ninguna)
       transmitir,
       cierrePayload,
       extras: state.ingresos.filter(i => !i.preset && i.monto > 0)
@@ -1292,13 +1302,18 @@ async function enviarCierre(transmitir = true) {
     ULTIMO_PAQUETE = paquete;
 
     // Sin señal: no intentar, guardar en cola y avisar con calma
-    if (!navigator.onLine) { colaCierreGuardar(paquete); avisoCierrePendiente(paquete); return; }
+    if (!navigator.onLine) { encolarCierre(paquete); return; }
 
-    const cierreId = await conTope(persistirCierre(paquete), 12000);
-    state.cierreId = cierreId;
-    colaCierreQuitar(paquete.fecha);
+    const res = await enTurno(() => enviarConTope(paquete, 12000));
+    state.cierreId = res.id;
+    state.serverUpdatedAt = res.updated_at || state.serverUpdatedAt;
+    colaCierreQuitar(paquete.fecha, paquete.creado);
 
-    if (transmitir) {
+    if (res.aplicado === false) {
+      // el servidor ya tenía una versión más nueva de este mismo equipo: se muestra esa
+      await loadExistingCierre(); ensureIngresosPresets(); renderAll();
+      toast("ℹ️ En el servidor ya había una versión más nueva de este cierre. Se muestra esa.", 7000);
+    } else if (transmitir) {
       state.transmittedAt = cierrePayload.transmitted_at;
       state.unlockUntil = 0; // consume el unlock si estaba activo
       applyLockState();
@@ -1306,19 +1321,26 @@ async function enviarCierre(transmitir = true) {
     } else {
       toast("✅ Cierre enviado correctamente");
     }
+    saveDraft();   // el borrador recuerda que ya se envió (y qué versión del servidor vio este equipo)
     updateStatus();
 
   } catch (err) {
     console.error(err);
-    if (esSinSesion(err) && ULTIMO_PAQUETE && ULTIMO_PAQUETE.fecha === state.fecha) {
+    const mio = ULTIMO_PAQUETE && ULTIMO_PAQUETE.fecha === state.fecha ? ULTIMO_PAQUETE : null;
+    if (mio && esChoque(err)) {
+      // Otro equipo (o el Admin) cambió este día, o el día ya está cerrado: no se reemplaza a ciegas
+      cierreEnConflicto(mio, err.cierre, err.message === "BLOQUEADO");
+    } else if (esSinSesion(err) && mio) {
       // Sin sesión válida: el cierre NO se pierde; queda en cola y se envía apenas entre con su PIN
-      colaCierreGuardar(ULTIMO_PAQUETE); localStorage.removeItem(CAJA_SES_KEY);
-      mostrarGateCaja("Para enviar el cierre, entra con tu PIN. Tu cierre quedó guardado en este equipo.");
-    } else if (esErrorDeRed(err) && ULTIMO_PAQUETE && ULTIMO_PAQUETE.fecha === state.fecha) {
+      const guardado = colaCierreGuardar(mio); localStorage.removeItem(CAJA_SES_KEY);
+      mostrarGateCaja(guardado ? "Para enviar el cierre, entra con tu PIN. Tu cierre quedó guardado en este equipo."
+        : "Para enviar el cierre, entra con tu PIN. Después toca otra vez «Enviar cierre del día».");
+    } else if (esErrorDeRed(err) && mio) {
       // Señal caída o servidor sin responder: queda en cola y se reenvía solo
-      colaCierreGuardar(ULTIMO_PAQUETE); avisoCierrePendiente(ULTIMO_PAQUETE);
+      encolarCierre(mio);
     } else {
-      toast("❌ Error: " + (err.message || err) + " — Guardado localmente, reintentar con internet");
+      // El servidor lo rechazó (el guardado es todo o nada: en el servidor no cambió nada)
+      toast("❌ El servidor no aceptó el cierre: " + (err.message || err) + " — No se envió. Tus datos siguen en pantalla: corrígelo y vuelve a enviar.", 9000);
     }
     updateStatus();
   } finally {
@@ -1335,32 +1357,47 @@ async function enviarCierre(transmitir = true) {
 let ULTIMO_PAQUETE = null;
 const COLA_CIERRE_KEY = "caja_cola_cierres_v1";
 
-// Escribe en Supabase el paquete completo del cierre. Idempotente: upsert por fecha + borrar/reinsertar hijos.
-async function persistirCierre(p) {
-  if (!cajaToken()) throw new Error(SIN_SESION); // sin sesión no se toca el servidor: el paquete queda en cola
-  let cierreId = p.cierreId;
-  if (cierreId) {
-    const { data: upd, error } = await supabase.from('dia_cierre').update(p.cierrePayload).eq('id', cierreId).select('id');
-    if (error) throw error;
-    if (!upd || !upd.length) throw new Error(SIN_SESION); // 0 filas = la base de datos no aceptó la sesión
-  } else {
-    const { data, error } = await supabase.from('dia_cierre')
-      .upsert(p.cierrePayload, { onConflict: 'fecha' })
-      .select()
-      .single();
-    if (error) throw error;
-    cierreId = data.id;
-  }
-  for (const t of ['forma_pago_extra', 'dia_gasto', 'dia_saco']) {
-    const { error } = await supabase.from(t).delete().eq('dia_cierre_id', cierreId);
-    if (error) throw error;
-  }
-  const con = (arr) => arr.map(x => ({ dia_cierre_id: cierreId, ...x }));
-  if (p.extras.length) { const { error } = await supabase.from('forma_pago_extra').insert(con(p.extras)); if (error) throw error; }
-  if (p.gastos.length) { const { error } = await supabase.from('dia_gasto').insert(con(p.gastos)); if (error) throw error; }
-  if (p.sacos.length)  { const { error } = await supabase.from('dia_saco').insert(con(p.sacos)); if (error) throw error; }
-  return cierreId;
+// 11/11/2026 (auditoría sin internet): el cierre se guarda COMPLETO en el servidor con UNA sola llamada
+// (oimira_caja.cierre_guardar): o se guarda todo o no cambia nada. El servidor además no deja que una versión
+// vieja pise a una nueva, avisa si otro equipo cambió ese día y respeta el día cerrado.
+const CAJA_EQUIPO_KEY = "caja_equipo_id";
+let CAJA_EQUIPO_MEM = null;
+function cajaEquipoId() {
+  try {
+    let e = localStorage.getItem(CAJA_EQUIPO_KEY);
+    if (!e) { e = (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(36).slice(2)); localStorage.setItem(CAJA_EQUIPO_KEY, e); }
+    return e;
+  } catch { return CAJA_EQUIPO_MEM || (CAJA_EQUIPO_MEM = "mem-" + Date.now() + "-" + Math.random().toString(36).slice(2)); }
 }
+async function persistirCierre(p, opciones = {}) {
+  if (!cajaToken()) throw new Error(SIN_SESION); // sin sesión no se toca el servidor: el paquete queda en cola
+  const cuerpo = {
+    equipo: p.equipo || cajaEquipoId(), creado: p.creado || new Date().toISOString(), base: p.base || null,
+    forzar: !!p.forzar || !p.equipo,   // paquetes guardados por una versión anterior de la app: como antes (gana el último)
+    cierre: p.cierrePayload, extras: p.extras || [], gastos: p.gastos || [], sacos: p.sacos || [],
+  };
+  let q = supabase.rpc("cierre_guardar", { p: cuerpo });
+  if (opciones.signal && q.abortSignal) q = q.abortSignal(opciones.signal);
+  const { data, error } = await q;
+  if (error) throw error;
+  if (!data || data.ok !== true) {
+    const e = new Error(data && data.conflicto ? "CONFLICTO" : data && data.bloqueado ? "BLOQUEADO" : "respuesta inesperada del servidor");
+    e.cierre = data || null; throw e;
+  }
+  return data;   // { ok, aplicado, id, updated_at, transmitted_at }
+}
+function esChoque(e) { return !!e && (e.message === "CONFLICTO" || e.message === "BLOQUEADO"); }
+// Envío con tiempo límite que CANCELA de verdad el pedido vencido (antes seguía vivo y podía cruzarse con el reintento).
+async function enviarConTope(p, ms) {
+  const ctl = new AbortController();
+  const vencio = new Promise((_, rej) => ctl.signal.addEventListener("abort", () => rej(new Error("timeout: el servidor no respondió"))));
+  const t = setTimeout(() => ctl.abort(), ms);
+  try { return await Promise.race([persistirCierre(p, { signal: ctl.signal }), vencio]); }
+  finally { clearTimeout(t); }
+}
+// Un solo envío a la vez: el botón "Enviar" y la cola esperan su turno, nunca se enciman.
+let CIERRE_TURNO = Promise.resolve();
+function enTurno(fn) { const r = CIERRE_TURNO.then(fn, fn); CIERRE_TURNO = r.catch(() => {}); return r; }
 function conTope(promesa, ms) {
   return Promise.race([promesa, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout: el servidor no respondió")), ms))]);
 }
@@ -1370,9 +1407,34 @@ function esErrorDeRed(e) {
   return m.includes("fetch") || m.includes("network") || m.includes("load failed") || m.includes("timeout") || (e && e.status >= 500);
 }
 function colaCierreLeer() { try { return JSON.parse(localStorage.getItem(COLA_CIERRE_KEY) || "[]"); } catch { return []; } }
-function colaCierreEscribir(c) { try { localStorage.setItem(COLA_CIERRE_KEY, JSON.stringify(c)); } catch {} pintarColaCierre(); }
-function colaCierreGuardar(p) { colaCierreEscribir([...colaCierreLeer().filter(x => x.fecha !== p.fecha), p]); } // el último paquete del día manda
-function colaCierreQuitar(fecha) { colaCierreEscribir(colaCierreLeer().filter(x => x.fecha !== fecha)); }
+function colaCierreEscribir(c) { let ok = true; try { localStorage.setItem(COLA_CIERRE_KEY, JSON.stringify(c)); } catch { ok = false; } pintarColaCierre(); return ok; } // false = el equipo no pudo guardarlo
+function colaCierreGuardar(p) { return colaCierreEscribir([...colaCierreLeer().filter(x => x.fecha !== p.fecha), p]); } // el último paquete del día manda
+// Quita de la cola SOLO la versión confirmada (y las anteriores a ella); una más nueva guardada mientras tanto se queda.
+function colaCierreQuitar(fecha, hasta) { return colaCierreEscribir(colaCierreLeer().filter(x => !(x.fecha === fecha && (!hasta || !x.creado || x.creado <= hasta)))); }
+const fechaDMA = (f) => String(f || "").split("-").reverse().join("/");
+function cajaErroresGuardar(p, motivo) {
+  try { localStorage.setItem("caja_cola_errores", JSON.stringify([...JSON.parse(localStorage.getItem("caja_cola_errores") || "[]"), { ...p, error: motivo, cuando: new Date().toISOString() }].slice(-10))); } catch {}
+}
+// Guarda el cierre en la cola y lo dice; si el equipo no pudo guardarlo, lo dice también (nunca "quedó guardado" sin serlo).
+function encolarCierre(p) {
+  if (colaCierreGuardar(p)) { avisoCierrePendiente(p); return true; }
+  avisoCartel("⚠️", "No se pudo guardar el envío", `Este equipo no tiene espacio para guardar el envío del cierre del <b>${fechaDMA(p.fecha)}</b>.`,
+    "Tus datos siguen en pantalla. No cierres la app: cuando vuelva la señal toca otra vez «Enviar cierre del día».", "#b91c1c");
+  updateLastSaved("⚠️ Cierre SIN enviar y sin guardar en cola (" + new Date().toLocaleTimeString() + ")");
+  return false;
+}
+function avisoCartel(icono, titulo, texto, destacado, color) {
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.55);display:grid;place-items:center;z-index:9999;padding:18px";
+  ov.innerHTML = `<div style="background:#fff;border-radius:18px;padding:22px 18px;max-width:380px;width:100%;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.25);font-family:system-ui,sans-serif">
+    <div style="font-size:44px">${icono}</div>
+    <h3 style="margin:8px 0 6px;font-size:18px;color:#0f172a">${titulo}</h3>
+    <p style="margin:0 0 14px;font-size:14.5px;line-height:1.5;color:#334155">${texto}</p>
+    <p style="margin:0 0 14px;font-weight:700;color:${color || "#0f766e"}">${destacado}</p>
+    <button style="background:#0f766e;color:#fff;border:0;border-radius:12px;padding:13px 18px;font-size:15.5px;font-weight:700;cursor:pointer;width:100%">Entendido</button></div>`;
+  ov.querySelector("button").onclick = () => ov.remove();
+  document.body.appendChild(ov);
+}
 function pintarColaCierre() {
   const c = colaCierreLeer();
   let el = document.getElementById("colaCierreAviso");
@@ -1382,7 +1444,73 @@ function pintarColaCierre() {
     el.style.cssText = "position:sticky;top:0;z-index:18;background:#fffbeb;border-bottom:2px solid #f59e0b;color:#92400e;padding:8px 14px;font-size:13px;line-height:1.4;text-align:center";
     const anchor = document.getElementById("srvBanner"); (anchor ? anchor : document.body.firstChild).insertAdjacentElement(anchor ? "afterend" : "beforebegin", el);
   }
-  el.innerHTML = `⏳ Cierre del <b>${c.map(x => x.fecha.split("-").reverse().join("/")).join(", ")}</b> guardado en este equipo, pendiente de enviar. Se envía solo apenas vuelva la señal; no tienes que hacer nada.`;
+  const pend = c.filter(x => !x.conflicto && !x.rechazado), choque = c.filter(x => x.conflicto), rech = c.filter(x => x.rechazado && !x.conflicto);
+  const lista = (a) => a.map(x => fechaDMA(x.fecha)).join(", ");
+  let h = "";
+  if (pend.length) h += `⏳ Cierre del <b>${lista(pend)}</b> guardado en este equipo, pendiente de enviar. Se envía solo apenas vuelva la señal; no tienes que hacer nada.`;
+  if (choque.length) h += `${h ? "<br>" : ""}⚠️ El cierre del <b>${lista(choque)}</b> guardado en este equipo <b>no se envió</b>: ese día ya tiene otro cierre en el servidor. <u>Toca aquí para decidir.</u>`;
+  if (rech.length) h += `${h ? "<br>" : ""}⛔ El servidor no aceptó el cierre del <b>${lista(rech)}</b>: ${String(rech[0].error || "").replace(/[<>&]/g, "")} Corrígelo en ese día y vuelve a enviar.`;
+  el.innerHTML = h;
+  el.style.cursor = choque.length ? "pointer" : "default";
+  el.onclick = choque.length ? () => dialogoConflicto(choque[0]) : null;
+}
+// ---- Conflicto: el servidor ya tiene otro cierre de ese día que este equipo no había visto (o el día ya está cerrado) ----
+function cierreEnConflicto(p, info, bloqueado) {
+  const marcado = { ...p, conflicto: true, bloqueado: !!bloqueado, actual: (info && info.actual) || null };
+  delete marcado.rechazado;
+  const guardado = colaCierreGuardar(marcado);   // queda guardado en el equipo, sin reintentos automáticos
+  dialogoConflicto(marcado, guardado);
+}
+let CONFLICTO_ABIERTO = false;
+function dialogoConflicto(p, guardado = true) {
+  if (CONFLICTO_ABIERTO) return; CONFLICTO_ABIERTO = true;
+  const a = p.actual || {};
+  const cuando = a.updated_at ? new Date(a.updated_at).toLocaleString("es-VE", { timeZone: APP_TZ, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+  const esc = (t) => String(t == null ? "" : t).replace(/[<>&]/g, "");
+  const ov = document.createElement("div"); ov.id = "cajaConflicto";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.6);display:grid;place-items:center;z-index:9999;padding:18px";
+  ov.innerHTML = `<div style="background:#fff;border-radius:18px;padding:20px 16px;max-width:400px;width:100%;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.25);font-family:system-ui,sans-serif">
+    <div style="font-size:40px">${p.bloqueado ? "🔒" : "⚠️"}</div>
+    <h3 style="margin:6px 0;font-size:17.5px;color:#0f172a">${p.bloqueado ? "Ese día ya está cerrado" : "Ese día ya tiene otro cierre"}</h3>
+    <p style="margin:0 0 10px;font-size:14px;line-height:1.5;color:#334155">El <b>${fechaDMA(p.fecha)}</b> ya tiene en el servidor un cierre${a.cajera ? " de <b>" + esc(a.cajera) + "</b>" : ""}${cuando ? ", guardado el " + cuando : ""}${a.cerrado ? " (cerrado oficialmente)" : ""}${p.bloqueado ? "." : " que este equipo no había visto."}</p>
+    <p style="margin:0 0 12px;font-size:13.5px;font-weight:700;color:${guardado ? "#0f766e" : "#b91c1c"}">${guardado ? "Tu versión NO se perdió: quedó guardada en este equipo y no se envía hasta que decidas." : "Este equipo no pudo guardar tu versión: no cierres la app hasta decidir."}</p>
+    <button id="cfVer" style="background:#0f766e;color:#fff;border:0;border-radius:12px;padding:12px;font-size:15px;font-weight:700;width:100%">Dejar el que está en el servidor</button>
+    <button id="cfMio" style="margin-top:8px;background:#fff;color:#b45309;border:2px solid #f59e0b;border-radius:12px;padding:11px;font-size:14.5px;font-weight:700;width:100%">Reemplazarlo con el mío</button>
+    <button id="cfLuego" style="margin-top:8px;background:#fff;color:#475569;border:1px solid #cbd5e1;border-radius:12px;padding:10px;font-size:13.5px;width:100%">Decidir después</button>
+    <div id="cfMsg" style="margin-top:8px;font-size:13px;color:#b91c1c;min-height:18px"></div></div>`;
+  document.body.appendChild(ov);
+  const cerrar = () => { ov.remove(); CONFLICTO_ABIERTO = false; };
+  const msgEl = ov.querySelector("#cfMsg"), bVer = ov.querySelector("#cfVer"), bMio = ov.querySelector("#cfMio");
+  const refrescarPantalla = async () => {
+    if (p.fecha !== state.fecha) return;
+    try { await deleteDraft(p.fecha); } catch {}
+    try { await loadExistingCierre(); } catch {}
+    ensureIngresosPresets(); renderAll(); applyLockState();
+  };
+  ov.querySelector("#cfLuego").onclick = cerrar;
+  bVer.onclick = async () => {
+    cajaErroresGuardar(p, "descartado por la cajera: se dejó el cierre que ya estaba en el servidor");   // queda una copia por si acaso
+    colaCierreQuitar(p.fecha, p.creado);
+    cerrar(); await refrescarPantalla();
+    toast("Se dejó el cierre que ya estaba en el servidor.", 6000);
+  };
+  bMio.onclick = async () => {
+    if (!navigator.onLine) { msgEl.textContent = "Sin señal: inténtalo cuando vuelva el internet. Tu versión sigue guardada."; return; }
+    bMio.disabled = bVer.disabled = true; bMio.textContent = "Enviando…";
+    try {
+      const res = await enTurno(() => enviarConTope({ ...p, forzar: true }, 15000));
+      colaCierreQuitar(p.fecha, p.creado);
+      if (p.fecha === state.fecha) { state.cierreId = res.id; state.serverUpdatedAt = res.updated_at || null; }
+      cerrar(); await refrescarPantalla();
+      toast(`✅ El cierre del ${fechaDMA(p.fecha)} se reemplazó con el de este equipo.`, 6000);
+    } catch (e) {
+      if (e && e.message === "BLOQUEADO") msgEl.textContent = "🔒 Ese día está cerrado oficialmente. Pide el código de desbloqueo al administrador, abre ese día, desbloquéalo y vuelve a tocar aquí. Tu versión sigue guardada.";
+      else if (esSinSesion(e)) { cerrar(); if (cajaToken()) localStorage.removeItem(CAJA_SES_KEY); mostrarGateCaja("Entra con tu PIN y vuelve a decidir. Tu versión sigue guardada en este equipo."); return; }
+      else if (esErrorDeRed(e)) msgEl.textContent = "Sin conexión con el servidor: inténtalo de nuevo en un momento. Tu versión sigue guardada.";
+      else msgEl.textContent = "El servidor no lo aceptó: " + (e.message || e);
+      bMio.disabled = bVer.disabled = false; bMio.textContent = "Reemplazarlo con el mío";
+    }
+  };
 }
 function avisoCierrePendiente(p) {
   updateLastSaved("⏳ Cierre pendiente de enviar (" + new Date().toLocaleTimeString() + ")");
@@ -1400,32 +1528,40 @@ function avisoCierrePendiente(p) {
 let COLA_CIERRE_ENVIANDO = false;
 async function colaCierreEnviar() {
   if (COLA_CIERRE_ENVIANDO || !navigator.onLine) return;
-  const c = colaCierreLeer().sort((a, b) => a.fecha.localeCompare(b.fecha));
-  if (!c.length) return;
+  // los que quedaron en conflicto o rechazados esperan una decisión de la cajera: no se reintentan solos
+  const pendientes = () => colaCierreLeer().filter(x => !x.conflicto && !x.rechazado).sort((a, b) => a.fecha.localeCompare(b.fecha));
+  if (!pendientes().length) return;
   COLA_CIERRE_ENVIANDO = true;
+  const vistos = new Set();   // cada versión se intenta una vez por vuelta; siempre se lee la cola ACTUAL
   try {
-    for (const p of c) {
+    while (true) {
+      const p = pendientes().find(x => !vistos.has(x.fecha + "|" + x.creado)); if (!p) break;
+      vistos.add(p.fecha + "|" + p.creado);
       try {
-        const id = await conTope(persistirCierre(p), 15000);
-        colaCierreQuitar(p.fecha);
-        if (p.fecha === state.fecha) {
-          state.cierreId = id;
-          if (p.transmitir) { state.transmittedAt = p.cierrePayload.transmitted_at; state.unlockUntil = 0; }
-          applyLockState();
+        const res = await enTurno(() => enviarConTope(p, 15000));
+        colaCierreQuitar(p.fecha, p.creado);   // solo esta versión: una corrección guardada mientras tanto sigue en cola
+        const quedaOtra = colaCierreLeer().some(x => x.fecha === p.fecha);
+        if (p.fecha === state.fecha && !quedaOtra) {
+          state.cierreId = res.id; state.serverUpdatedAt = res.updated_at || state.serverUpdatedAt;
+          if (p.transmitir) { state.transmittedAt = res.transmitted_at || p.cierrePayload.transmitted_at; state.unlockUntil = 0; }
+          applyLockState(); saveDraft();
         }
-        toast(`✅ Cierre del ${p.fecha.split("-").reverse().join("/")} enviado. ¡Todo en orden!`, 6000);
+        if (!quedaOtra) toast(`✅ Cierre del ${fechaDMA(p.fecha)} enviado. ¡Todo en orden!`, 6000);
         updateLastSaved("Enviado " + new Date().toLocaleTimeString());
       } catch (e) {
+        if (esChoque(e)) { cierreEnConflicto(p, e.cierre, e.message === "BLOQUEADO"); continue; }   // se conserva y se pregunta
         if (esSinSesion(e)) {                    // falta el PIN: conservar y pedirlo (nunca descartar el cierre)
           if (cajaToken()) localStorage.removeItem(CAJA_SES_KEY);
           mostrarGateCaja("Hay un cierre guardado en este equipo esperando para enviarse. Entra con tu PIN.");
           break;
         }
         if (esErrorDeRed(e)) break;              // sigue sin señal: conservar y reintentar luego
+        // El servidor lo rechazó (todo o nada: allá no cambió nada). Se conserva marcado para corregirlo, sin reintentos.
         console.warn("cierre rechazado por el servidor", p.fecha, e);
-        toast(`⚠️ El cierre del ${p.fecha.split("-").reverse().join("/")} fue rechazado por el servidor: ${e.message || e}. Avísale al administrador.`, 9000);
-        colaCierreQuitar(p.fecha);
-        try { localStorage.setItem("caja_cola_errores", JSON.stringify([...JSON.parse(localStorage.getItem("caja_cola_errores") || "[]"), { ...p, error: String(e.message || e) }].slice(-10))); } catch {}
+        const motivo = String(e.message || e);
+        cajaErroresGuardar(p, motivo);
+        colaCierreEscribir(colaCierreLeer().map(x => (x.fecha === p.fecha && x.creado === p.creado) ? { ...x, rechazado: true, error: motivo } : x));
+        toast(`⚠️ El servidor no aceptó el cierre del ${fechaDMA(p.fecha)}: ${motivo}`, 9000);
       }
     }
   } finally { COLA_CIERRE_ENVIANDO = false; }
@@ -1434,6 +1570,7 @@ window.addEventListener("online", () => setTimeout(colaCierreEnviar, 1500));
 document.addEventListener("visibilitychange", () => { if (!document.hidden) colaCierreEnviar(); });
 setInterval(colaCierreEnviar, 60000);
 window.addEventListener("load", () => { pintarColaCierre(); setTimeout(colaCierreEnviar, 4000); });
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch {}   // que el navegador no borre la cola ni los borradores
 
 // ============================================================================
 // Helpers UI
@@ -1560,7 +1697,7 @@ window.addEventListener("appinstalled", () => {
 })();
 
 // Sello de versión (para confirmar qué build está cargado en el dispositivo)
-const APP_BUILD = "2026-10-18.1";
+const APP_BUILD = "2026-11-11.1";
 (function(){ const e = document.getElementById("appVersion"); if (e) e.textContent = "🥖 Caja · v" + APP_BUILD; })();
 
 // ============================================================================
